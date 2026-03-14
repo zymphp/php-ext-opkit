@@ -38,6 +38,7 @@ zend_string_table opkit_interned_strings;
 #include "Zend/zend_virtual_cwd.h"
 #include "Zend/zend_inheritance.h"
 #include "Zend/zend_smart_str.h"
+#include "Zend/zend_exceptions.h"
 #include "zend_system_id.h"
 #include <dirent.h>
 #include <sys/stat.h>
@@ -988,8 +989,8 @@ ZEND_FUNCTION(opkit_boot) {
 	}
 
 	if (!loaded_scripts) {
-		zend_error(E_WARNING, "No script loaded for opkit_boot");
-		RETURN_LONG(-1);
+		zend_throw_exception(NULL, "No script loaded for opkit_boot", 0);
+		return;
 	}
 
 	zend_string *phar_prefix = NULL;
@@ -1141,7 +1142,7 @@ ZEND_FUNCTION(opkit_boot) {
 			if (args) {
 				zend_fcall_info_args_clear(&fci, 1);
 			}
-			RETVAL_LONG(-1);
+			zend_throw_exception(NULL, "Failed to call entry function", 0);
 		}
 	} else {
 		// Find and execute default main()
@@ -1158,10 +1159,10 @@ ZEND_FUNCTION(opkit_boot) {
 			if (zend_call_function(&fci_main, &fci_cache_main) == SUCCESS) {
 				RETVAL_ZVAL(&main_retval, 1, 1);
 			} else {
-				RETVAL_LONG(-1);
+				zend_throw_exception(NULL, "Failed to call main function", 0);
 			}
 		} else {
-			RETVAL_LONG(0);
+			zend_throw_exception(NULL, "Entry point \"main\" not found", 0);
 		}
 	}
 }
