@@ -1,0 +1,855 @@
+#!/usr/bin/env php
+<?php
+/*
+   +----------------------------------------------------------------------+
+   | OpKit                                                                |
+   +----------------------------------------------------------------------+
+   | Copyright (c) The PHP Group                                          |
+   +----------------------------------------------------------------------+
+   | This source file is subject to version 3.01 of the PHP license,      |
+   | that is bundled with this package in the file LICENSE, and is        |
+   | available through the world-wide-web at the following url:           |
+   | https://www.php.net/license/3_01.txt                                 |
+   | If you did not receive a copy of the PHP license and are unable to   |
+   | obtain it through the world-wide-web, please send a note to          |
+   | license@php.net so we can mail you a copy immediately.               |
+   +----------------------------------------------------------------------+
+   | Author: Eno-CN <Eno_CN@qq.com>                                       |
+   +----------------------------------------------------------------------+
+   | OpKit is heavily based on Zend OPcache                               |
+   +----------------------------------------------------------------------+
+   | This product includes PHP software, freely available from            |
+   | <http://www.php.net/software/>                                       |
+   +----------------------------------------------------------------------+
+*/
+
+/**
+ * phpc - OpKit CLI Compilation Tool
+ *
+ * Used to recursively compile specified PHP source files or directories into .phpc binary opcode cache files.
+ *
+ * Usage:
+ * php phpc -s <source_dir_or_file> -o <output_dir>
+ *
+ * Example:
+ * php phpc -s src/ -o bin/
+ */
+
+if (PHP_SAPI !== 'cli') {
+    die("This script must be run in CLI mode.\n");
+}
+
+if (!extension_loaded('opkit')) {
+    echo "Error: OpKit extension not loaded. Please enable it in php.ini or load it via -d.\n";
+    exit(1);
+}
+
+$options = getopt("s:o:i:p:e:c:hfa:z:", ["src:", "output:", "info:", "phar:", "entry:", "config:", "help", "force", "no-incremental", "stubs:", "analyze:", "compress:", "sign:", "sign-key:"]);
+
+if (isset($options['h']) || isset($options['help'])) {
+    showUsage();
+    exit(0);
+}
+
+// Default configuration loading
+$config_file = $options['c'] ?? $options['config'] ?? 'opkit.json';
+$config = [];
+if (file_exists($config_file)) {
+    $json = file_get_contents($config_file);
+    if ($json) {
+        $config = json_decode($json, true) ?: [];
+    }
+}
+
+// Parameter merging: CLI priority highest > Configuration file > Default values
+$src = $options['s'] ?? $options['src'] ?? $config['src'] ?? null;
+$output = $options['o'] ?? $options['output'] ?? $config['output'] ?? null;
+$info_file = $options['i'] ?? $options['info'] ?? null;
+$phar_file = $options['p'] ?? $options['phar'] ?? $config['phar'] ?? null;
+$gen_entry = $options['e'] ?? $options['entry'] ?? $config['entry'] ?? null;
+$force = isset($options['f']) || isset($options['force']) || ($config['force'] ?? false);
+$incremental = !isset($options['no-incremental']) && !($config['no-incremental'] ?? false);
+$stubs_dir = $options['stubs'] ?? $config['stubs'] ?? null;
+$analyze_path = $options['a'] ?? $options['analyze'] ?? null;
+$compress = $options['z'] ?? $options['compress'] ?? $config['compress'] ?? null;
+$sign = $options['sign'] ?? $config['sign'] ?? null;
+$sign_key = $options['sign-key'] ?? $config['sign-key'] ?? null;
+
+// Handle subcommands (like phpc analyze <path>)
+if (isset($argv[1]) && !str_starts_with($argv[1], '-')) {
+    $cmd = $argv[1];
+    $arg = $argv[2] ?? null;
+    if ($cmd === 'analyze' && $arg) {
+        $analyze_path = $arg;
+    } else if ($cmd === 'info' && $arg) {
+        $info_file = $arg;
+    }
+}
+
+if ($analyze_path) {
+    analyzeAction($analyze_path);
+    exit(0);
+}
+
+if ($info_file) {
+    showInfo($info_file);
+    exit(0);
+}
+
+// Check mode logic
+$can_compile = ($src && $output);
+$can_gen_entry = ($gen_entry || ($can_compile && !$phar_file)); // Auto mode: Generate entry.php in output directory if compiling without packaging
+$can_package = ($phar_file && ($output || is_dir('.')));
+
+if (!$can_compile && !$can_package && !$gen_entry) {
+    echo "Error: No valid action specified (compile -s/-o, package -p, or generate entry -e).\n\n";
+    showUsage();
+    exit(1);
+}
+
+/**
+ * Convert path to absolute path.
+ *
+ * Since OpKit extension resolves relative paths relative to the script that calls it (i.e., this script),
+ * but CLI tool users usually expect resolution relative to the Current Working Directory (CWD).
+ * Therefore, we manually convert user-input paths to absolute paths before calling extension functions.
+ */
+function resolve_absolute($path) {
+    if (strpos($path, '/') === 0 || (strpos($path, ':') === 1 && strpos($path, '\\') === 2)) {
+        return $path;
+    }
+    $cwd = getcwd();
+    $full = $cwd . DIRECTORY_SEPARATOR . $path;
+    $real = realpath($full);
+    return $real ? $real : $full;
+}
+
+// 1. Compile Mode
+if ($can_compile) {
+    $abs_src = resolve_absolute($src);
+    $abs_output = resolve_absolute($output);
+
+    if (!file_exists($abs_src)) {
+        echo "Error: Source path '$src' does not exist (resolved path: $abs_src).\n";
+        exit(1);
+    }
+
+    // Ensure output directory exists
+    if (!is_dir($abs_output)) {
+        if (!mkdir($abs_output, 0777, true) && !is_dir($abs_output)) {
+            echo "Error: Cannot create output directory '$output'.\n";
+            exit(1);
+        }
+    }
+    $abs_output = realpath($abs_output);
+
+    echo "--------------------------------------------------\n";
+    echo "OpKit is compiling" . ($incremental ? " (incremental mode)" : "") . ($force ? " [force]" : "") . "...\n";
+    echo "Source: $abs_src\n";
+    echo "Output: $abs_output\n";
+    echo "--------------------------------------------------\n";
+
+    $count = 0;
+    $skipped = 0;
+    $failed = 0;
+    $total_start = microtime(true);
+
+    if (is_dir($abs_src)) {
+        $it = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($abs_src, RecursiveDirectoryIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::SELF_FIRST
+        );
+
+        foreach ($it as $file) {
+            if ($file->isFile() && $file->getExtension() === 'php') {
+                $src_file = $file->getRealPath();
+                $rel_path = substr($src_file, strlen($abs_src) + 1);
+                $target_file = $abs_output . DIRECTORY_SEPARATOR . $rel_path . 'c';
+
+                $should_compile = true;
+                if ($incremental && !$force && file_exists($target_file)) {
+                    // Compare mtime
+                    if (filemtime($src_file) <= filemtime($target_file)) {
+                        $should_compile = false;
+                    }
+                }
+
+                if ($should_compile) {
+                    $target_dir = dirname($target_file);
+                    if (!is_dir($target_dir)) {
+                        mkdir($target_dir, 0777, true);
+                    }
+                    $file_start = microtime(true);
+                    try {
+                        if (opkit_compile_file($abs_output, $src_file)) {
+                            $duration = microtime(true) - $file_start;
+                            echo sprintf("[COMPILE] %s (%.3fs)\n", $rel_path, $duration);
+                            $count++;
+                        } else {
+                            echo "[FAILED]  $rel_path: Unknown error\n";
+                            $failed++;
+                        }
+                    } catch (Throwable $e) {
+                        $duration = microtime(true) - $file_start;
+                        $msg = $e->getMessage();
+                        // Try to extract line number from exception message if available
+                        echo sprintf("[FAILED]  %s: %s (%.3fs)\n", $rel_path, $msg, $duration);
+                        $failed++;
+                    }
+                } else {
+                    $skipped++;
+                }
+            }
+        }
+    } else {
+        $target_file = $abs_output . DIRECTORY_SEPARATOR . basename($abs_src) . 'c';
+        $should_compile = true;
+        if ($incremental && !$force && file_exists($target_file)) {
+            if (filemtime($abs_src) <= filemtime($target_file)) {
+                $should_compile = false;
+            }
+        }
+
+        if ($should_compile) {
+            $file_start = microtime(true);
+            try {
+                if (opkit_compile_file($abs_output, $abs_src)) {
+                    $duration = microtime(true) - $file_start;
+                    echo sprintf("[COMPILE] %s (%.3fs)\n", basename($abs_src), $duration);
+                    $count++;
+                } else {
+                    echo "[FAILED]  " . basename($abs_src) . ": Unknown error\n";
+                    $failed++;
+                }
+            } catch (Throwable $e) {
+                $duration = microtime(true) - $file_start;
+                echo sprintf("[FAILED]  %s: %s (%.3fs)\n", basename($abs_src), $e->getMessage(), $duration);
+                $failed++;
+            }
+        } else {
+            $skipped++;
+        }
+    }
+
+    $total_duration = microtime(true) - $total_start;
+    echo sprintf("\nCompilation complete: Success %d, Skipped %d, Failed %d (Total time: %.3fs)\n", $count, $skipped, $failed, $total_duration);
+    if ($failed > 0) {
+        exit(1);
+    }
+
+    // 4. Stubs Generation Mode (can be triggered after compilation)
+    if ($stubs_dir) {
+        generateStubsAction($abs_output, $stubs_dir);
+    }
+}
+
+// 4. Independent Stubs Generation (if -s -o not specified but output is known)
+if (!$can_compile && $stubs_dir && $output) {
+    generateStubsAction(resolve_absolute($output), $stubs_dir);
+}
+
+// 2. Generate Bootstrap Entry File Mode
+if ($gen_entry || ($can_compile && !$phar_file)) {
+    $entry_path = $gen_entry ? resolve_absolute($gen_entry) : ($abs_output . DIRECTORY_SEPARATOR . 'entry.php');
+    if (opkit_gen_entry_file($entry_path)) {
+        echo "[SUCCESS] Bootstrap entry file generated: $entry_path\n";
+    } else {
+        echo "[WARNING] Failed to generate bootstrap file.\n";
+    }
+}
+
+// 3. Packaging Mode
+if ($can_package) {
+    if (ini_get('phar.readonly')) {
+        echo "[ERROR] phar.readonly is On, modification or creation of Phar files is prohibited.\n";
+        echo "Please set phar.readonly=Off in php.ini, or add command line argument -d phar.readonly=0\n";
+        echo "Example: php -d phar.readonly=0 phpc -s src -o output -p app.phar\n";
+        exit(1);
+    }
+
+    $dir_to_phar = $output ? resolve_absolute($output) : getcwd();
+    // If compiling + packaging, try to automatically generate bootstrap file before packaging
+    if ($can_compile && $phar_file) {
+        $auto_entry = $dir_to_phar . DIRECTORY_SEPARATOR . 'entry.php';
+        if (!file_exists($auto_entry)) {
+            if (opkit_gen_entry_file($auto_entry)) {
+                echo "[SUCCESS] Bootstrap entry file generated: $auto_entry\n";
+            }
+        }
+    }
+    createPhar($dir_to_phar, $phar_file, $compress, $sign, $sign_key);
+}
+
+/**
+ * Perform static analysis on compiled .phpc files
+ */
+function analyzeAction($path) {
+    $abs_path = resolve_absolute($path);
+    if (!file_exists($abs_path)) {
+        echo "[ERROR] Path '$path' does not exist.\n";
+        return;
+    }
+
+    $files = [];
+    if (is_dir($abs_path)) {
+        $it = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($abs_path, RecursiveDirectoryIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::SELF_FIRST
+        );
+        foreach ($it as $file) {
+            if ($file->isFile() && $file->getExtension() === 'phpc') {
+                $files[] = $file->getRealPath();
+            }
+        }
+    } else {
+        $files[] = $abs_path;
+    }
+
+    if (empty($files)) {
+        echo "No .phpc files found in '$path'.\n";
+        return;
+    }
+
+    $stats = [
+        'total_files' => count($files),
+        'total_mem' => 0,
+        'total_str' => 0,
+        'metadata_size' => 0,
+        'code_size' => 0,
+        'data_size' => 0,
+        'misc_size' => 0,
+        'functions' => [],
+        'classes' => [],
+        'constants' => [],
+    ];
+
+    echo "--------------------------------------------------\n";
+    echo "OpKit Static Analysis Report\n";
+    echo "Target: $abs_path\n";
+    echo "--------------------------------------------------\n";
+
+    foreach ($files as $f) {
+        $info = opkit_get_info($f);
+        if (!$info) continue;
+
+        $stats['total_mem'] += $info['mem_size'];
+        $stats['total_str'] += $info['str_size'];
+        $stats['metadata_size'] += ($info['metadata_size'] ?? 0);
+        $stats['code_size'] += ($info['code_size'] ?? 0);
+        $stats['data_size'] += ($info['data_size'] ?? 0);
+        $stats['misc_size'] += ($info['misc_size'] ?? 0);
+
+        if (!empty($info['functions'])) {
+            foreach ($info['functions'] as $func) {
+                $name = is_array($func) ? $func['name'] : $func;
+                $stats['functions'][$name][] = $f;
+            }
+        }
+        if (!empty($info['classes'])) {
+            foreach ($info['classes'] as $cls) {
+                $name = is_array($cls) ? $cls['name'] : $cls;
+                $stats['classes'][$name][] = $f;
+            }
+        }
+        if (!empty($info['constants'])) {
+            foreach ($info['constants'] as $const) {
+                $name = is_array($const) ? $const['name'] : $const;
+                $stats['constants'][$name][] = $f;
+            }
+        }
+    }
+
+    echo sprintf("Total Files     : %d\n", $stats['total_files']);
+    echo sprintf("Total Memory    : %s bytes\n", number_format($stats['total_mem']));
+    echo sprintf("Total Symbols   : %d functions, %d classes, %d constants\n",
+        count($stats['functions']), count($stats['classes']), count($stats['constants']));
+
+    echo "--------------------------------------------------\n";
+    echo "Logical Subdivision Summary:\n";
+    $total = $stats['total_mem'] > 0 ? $stats['total_mem'] : 1;
+    echo sprintf("  Metadata Area : %s bytes (%.1f%%)\n", number_format($stats['metadata_size']), ($stats['metadata_size']/$total*100));
+    echo sprintf("  Code Area     : %s bytes (%.1f%%)\n", number_format($stats['code_size']), ($stats['code_size']/$total*100));
+    echo sprintf("  Data Area     : %s bytes (%.1f%%)\n", number_format($stats['data_size']), ($stats['data_size']/$total*100));
+    echo sprintf("  Misc Area     : %s bytes (%.1f%%)\n", number_format($stats['misc_size']), ($stats['misc_size']/$total*100));
+
+    // Check for conflicts
+    $conflicts = [];
+    foreach (['functions', 'classes', 'constants'] as $type) {
+        foreach ($stats[$type] as $name => $files) {
+            if (count($files) > 1) {
+                $conflicts[] = [
+                    'type' => $type,
+                    'name' => $name,
+                    'files' => array_map(function($f) use ($abs_path) {
+                        return (strpos($f, $abs_path) === 0) ? substr($f, strlen($abs_path) + 1) : $f;
+                    }, $files)
+                ];
+            }
+        }
+    }
+
+    if (!empty($conflicts)) {
+        echo "--------------------------------------------------\n";
+        echo "[WARNING] Symbol Conflicts Found:\n";
+        echo "The following symbols are defined in multiple files, which will cause fatal errors during opkit_boot().\n";
+        foreach ($conflicts as $c) {
+            $file_list = $c['files'];
+            sort($file_list);
+            echo sprintf("  - %s: %s (defined in: %s)\n", ucfirst($c['type']), $c['name'], implode(', ', $file_list));
+        }
+    } else {
+        echo "--------------------------------------------------\n";
+        echo "[SUCCESS] No symbol conflicts detected.\n";
+    }
+    echo "--------------------------------------------------\n";
+}
+
+function showUsage() {
+    global $argv;
+    $script = basename($argv[0]);
+    echo "phpc CLI compilation tool usage:\n";
+    echo "  php $script -s <source_path> -o <output_dir>\n";
+    echo "  ./$script -s <source_path> -o <output_dir> (if executable permission granted)\n";
+    echo "  php $script -s <source_path> -o <output_dir> -p <output.phar> (compile and package as Phar)\n";
+    echo "  php $script -c <config.json> (using configuration file)\n";
+    echo "  php $script -o <output_dir> -p <output.phar> (package existing directory only)\n";
+    echo "  php $script -e <entry_file_path> (generate bootstrap entry file only)\n";
+    echo "  php $script -i <.phpc_file_path> (view file info)\n";
+    echo "  php $script -a <dir|file> (static analysis for compiled files)\n";
+    echo "  php $script analyze <dir|file> (analyze subcommand)\n";
+    echo "  php $script -s <src> -o <out> --stubs <stubs_dir> (compile and generate PHP stubs)\n";
+    echo "  php $script --src <source_path> --output <output_dir>\n\n";
+    echo "Parameters:\n";
+    echo "  -s, --src            PHP source file or directory path to compile (supports relative and absolute paths)\n";
+    echo "  -o, --output         Target output directory (where compilation results are stored, or packaging directory)\n";
+    echo "  -p, --phar           Specify the generated Phar filename (can be used independently or with -o)\n";
+    echo "  -e, --entry          Specify the path for the bootstrap entry file to be generated\n";
+    echo "  -c, --config         Specify the configuration file (default: opkit.json)\n";
+    echo "  -f, --force          Force recompile all files\n";
+    echo "  --no-incremental    Disable incremental compilation\n";
+    echo "  -a, --analyze <dir|file>  Perform static analysis on .phpc files (check conflicts, stats)\n";
+    echo "  -z, --compress <format>  Phar compression: gz, bz2, none (default: none)\n";
+    echo "  --sign <algo>       Phar signature: sha1, sha256, sha512, openssl\n";
+    echo "  --sign-key <file>   Private key file for OpenSSL signature\n";
+    echo "  --stubs <dir>       Generate PHP stubs for static analysis\n";
+    echo "  -i, --info           View info for the specified .phpc binary file\n";
+    echo "  -h, --help           Show this help information\n";
+}
+
+/**
+ * Create Phar archive
+ */
+function createPhar($dir, $phar_name, $compress = null, $sign = null, $sign_key = null) {
+    if (!class_exists('Phar')) {
+        echo "[ERROR] Phar extension is not enabled in the current environment, cannot package.\n";
+        return;
+    }
+
+    if (ini_get('phar.readonly')) {
+        echo "[ERROR] phar.readonly is On, modification or creation of Phar files is prohibited.\n";
+        echo "Please set phar.readonly=Off in php.ini, or add command line argument -d phar.readonly=0\n";
+        return;
+    }
+
+    $abs_dir = resolve_absolute($dir);
+    if (!is_dir($abs_dir)) {
+        echo "[ERROR] Directory '$dir' does not exist, cannot package.\n";
+        return;
+    }
+
+    // Ensure .phar suffix
+    if (substr($phar_name, -5) !== '.phar') {
+        $phar_name .= '.phar';
+    }
+
+    $phar_path = resolve_absolute($phar_name);
+    if (file_exists($phar_path)) {
+        unlink($phar_path);
+    }
+
+    // Use sub-process to execute Phar packaging to avoid memory conflicts
+    $php_bin = PHP_BINARY;
+    $cmd = "$php_bin -d phar.readonly=Off -r " . escapeshellarg("
+        \$abs_dir = " . var_export($abs_dir, true) . ";
+        \$phar_path = " . var_export($phar_path, true) . ";
+        \$compress = " . var_export($compress, true) . ";
+        \$sign = " . var_export($sign, true) . ";
+        \$sign_key = " . var_export($sign_key, true) . ";
+        try {
+            \$phar = new Phar(\$phar_path);
+            \$phar->startBuffering();
+            \$files = new RecursiveIteratorIterator(
+                new RecursiveDirectoryIterator(\$abs_dir, RecursiveDirectoryIterator::SKIP_DOTS),
+                RecursiveIteratorIterator::SELF_FIRST
+            );
+            foreach (\$files as \$file) {
+                if (\$file->isFile()) {
+                    \$pathname = \$file->getPathname();
+                    \$relative_path = substr(\$pathname, strlen(\$abs_dir) + 1);
+                    \$phar->addFile(\$pathname, \$relative_path);
+                }
+            }
+            \$stub = \$phar->createDefaultStub('entry.php');
+            \$phar->setStub(\$stub);
+
+            if (\$sign) {
+                \$algo = null;
+                switch (strtolower(\$sign)) {
+                    case 'sha1': \$algo = Phar::SHA1; break;
+                    case 'sha256': \$algo = Phar::SHA256; break;
+                    case 'sha512': \$algo = Phar::SHA512; break;
+                    case 'openssl': \$algo = Phar::OPENSSL; break;
+                    default: throw new Exception('Unsupported signature algorithm: ' . \$sign);
+                }
+                if (\$algo === Phar::OPENSSL) {
+                    if (!\$sign_key || !file_exists(\$sign_key)) {
+                        throw new Exception('OpenSSL signature requires a private key file.');
+                    }
+                    \$phar->setSignatureAlgorithm(\$algo, file_get_contents(\$sign_key));
+                } else {
+                    \$phar->setSignatureAlgorithm(\$algo);
+                }
+            }
+
+            if (\$compress) {
+                switch (strtolower(\$compress)) {
+                    case 'gz':
+                    case 'gzip':
+                        if (!Phar::canCompress(Phar::GZ)) throw new Exception('zlib extension is required for GZip compression.');
+                        \$phar->compressFiles(Phar::GZ);
+                        break;
+                    case 'bz2':
+                    case 'bzip2':
+                        if (!Phar::canCompress(Phar::BZ2)) throw new Exception('bzip2 extension is required for BZip2 compression.');
+                        \$phar->compressFiles(Phar::BZ2);
+                        break;
+                    case 'none':
+                        break;
+                    default:
+                        throw new Exception('Unsupported compression format: ' . \$compress);
+                }
+            }
+
+            \$phar->stopBuffering();
+            exit(0);
+        } catch (Exception \$e) {
+            echo '[ERROR] ' . \$e->getMessage() . PHP_EOL;
+            exit(1);
+        }
+    ");
+
+    echo "Packaging directory '$abs_dir' to '$phar_name'...\n";
+    passthru($cmd, $return_var);
+
+    if ($return_var === 0) {
+        echo "[SUCCESS] Phar file created: $phar_path\n";
+        echo "--------------------------------------------------\n";
+        echo "You can run the Phar file directly to start the application:\n";
+        echo "php -d zend_extension=opkit.so $phar_name\n";
+        echo "--------------------------------------------------\n";
+    } else {
+        echo "[ERROR] Failed to create Phar.\n";
+    }
+}
+
+/**
+ * Generate PHP stubs from compiled .phpc files
+ */
+function generateStubsAction($output_dir, $stubs_dir) {
+    $abs_output = resolve_absolute($output_dir);
+    $abs_stubs = resolve_absolute($stubs_dir);
+
+    if (!is_dir($abs_output)) {
+        echo "[ERROR] Output directory '$output_dir' does not exist.\n";
+        return;
+    }
+
+    if (!is_dir($abs_stubs)) {
+        mkdir($abs_stubs, 0777, true);
+    }
+
+    echo "Generating PHP stubs in '$abs_stubs'...\n";
+
+    $it = new RecursiveIteratorIterator(
+        new RecursiveDirectoryIterator($abs_output, RecursiveDirectoryIterator::SKIP_DOTS),
+        RecursiveIteratorIterator::SELF_FIRST
+    );
+
+    foreach ($it as $file) {
+        if ($file->isFile() && $file->getExtension() === 'phpc') {
+            $phpc_file = $file->getRealPath();
+            $rel_path = substr($phpc_file, strlen($abs_output) + 1);
+            $stub_file = $abs_stubs . DIRECTORY_SEPARATOR . substr($rel_path, 0, -1); // remove 'c'
+
+            $info = opkit_get_info($phpc_file);
+            if ($info && $info['system_id_match']) {
+                $content = generateStubContent($info);
+                $stub_dir = dirname($stub_file);
+                if (!is_dir($stub_dir)) {
+                    mkdir($stub_dir, 0777, true);
+                }
+                file_put_contents($stub_file, $content);
+                echo "[STUB]    " . substr($rel_path, 0, -1) . "\n";
+            }
+        }
+    }
+    echo "Stubs generation complete.\n";
+}
+
+function split_name($full_name) {
+    $pos = strrpos($full_name, '\\');
+    if ($pos === false) {
+        return ['', $full_name];
+    }
+    return [substr($full_name, 0, $pos), substr($full_name, $pos + 1)];
+}
+
+function generateStubContent($info) {
+    // Visibility flags from Zend
+    $ZEND_ACC_PUBLIC = 0x01;
+    $ZEND_ACC_PROTECTED = 0x02;
+    $ZEND_ACC_PRIVATE = 0x04;
+    $ZEND_ACC_STATIC = 0x10;
+
+    $namespaces = []; // ns => ['functions' => [], 'classes' => [], 'constants' => []]
+
+    if (!empty($info['functions'])) {
+        foreach ($info['functions'] as $func) {
+            $fname = is_array($func) ? $func['name'] : $func;
+            $fsig = is_array($func) ? ($func['signature'] ?? '()') : '()';
+            list($ns, $name) = split_name($fname);
+            $namespaces[$ns]['functions'][] = ['name' => $name, 'signature' => $fsig];
+        }
+    }
+
+    if (!empty($info['classes'])) {
+        foreach ($info['classes'] as $class) {
+            $cname = is_array($class) ? $class['name'] : $class;
+            list($ns, $name) = split_name($cname);
+            $namespaces[$ns]['classes'][] = is_array($class) ? array_merge($class, ['name' => $name]) : ['name' => $name];
+        }
+    }
+
+    if (!empty($info['constants'])) {
+        foreach ($info['constants'] as $const) {
+            $cname = is_array($const) ? $const['name'] : $const;
+            list($ns, $name) = split_name($cname);
+            $namespaces[$ns]['constants'][] = ['name' => $name];
+        }
+    }
+
+    $out = "<?php\n\n";
+    foreach ($namespaces as $ns => $content) {
+        if ($ns !== '') {
+            $out .= "namespace $ns {\n";
+            $indent = "    ";
+        } else {
+            $indent = "";
+        }
+
+        if (!empty($content['constants'])) {
+            foreach ($content['constants'] as $const) {
+                $out .= $indent . "const " . $const['name'] . " = null;\n";
+            }
+            $out .= "\n";
+        }
+
+        if (!empty($content['functions'])) {
+            foreach ($content['functions'] as $func) {
+                $out .= $indent . "function " . $func['name'] . $func['signature'] . " {}\n";
+            }
+            $out .= "\n";
+        }
+
+        if (!empty($content['classes'])) {
+            foreach ($content['classes'] as $class) {
+                $out .= $indent . "class " . $class['name'] . " {\n";
+                if (!empty($class['constants'])) {
+                    foreach ($class['constants'] as $cname) {
+                        $out .= $indent . "    const $cname = null;\n";
+                    }
+                }
+                if (!empty($class['properties'])) {
+                    foreach ($class['properties'] as $prop) {
+                        $pname = is_array($prop) ? $prop['name'] : $prop;
+                        $pflags = is_array($prop) ? ($prop['flags'] ?? $ZEND_ACC_PUBLIC) : $ZEND_ACC_PUBLIC;
+
+                        $prefix = "";
+                        if ($pflags & $ZEND_ACC_STATIC) $prefix .= "static ";
+                        if ($pflags & $ZEND_ACC_PRIVATE) $prefix .= "private ";
+                        elseif ($pflags & $ZEND_ACC_PROTECTED) $prefix .= "protected ";
+                        else $prefix .= "public ";
+
+                        $out .= $indent . "    $prefix$$pname;\n";
+                    }
+                }
+                if (!empty($class['methods'])) {
+                    foreach ($class['methods'] as $method) {
+                        $mname = $method['name'];
+                        $msig = $method['signature'] ?? '()';
+                        $mflags = $method['flags'] ?? $ZEND_ACC_PUBLIC;
+
+                        $prefix = "";
+                        if ($mflags & $ZEND_ACC_STATIC) $prefix .= "static ";
+                        if ($mflags & $ZEND_ACC_PRIVATE) $prefix .= "private ";
+                        elseif ($mflags & $ZEND_ACC_PROTECTED) $prefix .= "protected ";
+                        else $prefix .= "public ";
+
+                        $out .= $indent . "    $prefix function $mname$msig {}\n";
+                    }
+                }
+                $out .= $indent . "}\n\n";
+            }
+        }
+
+        if ($ns !== '') {
+            $out .= "}\n";
+        }
+        $out .= "\n";
+    }
+    return $out;
+}
+function showInfo($file) {
+    $abs_file = resolve_absolute($file);
+    if (!file_exists($abs_file)) {
+        echo "Error: File '$file' does not exist.\n";
+        exit(1);
+    }
+
+    $info = opkit_get_info($abs_file);
+    if (!$info) {
+        echo "Error: Failed to parse file '$file', it might not be a valid .phpc file.\n";
+        exit(1);
+    }
+
+    echo "--------------------------------------------------\n";
+    echo "OpKit .phpc file information:\n";
+    echo "File: $abs_file\n";
+    echo "--------------------------------------------------\n";
+    echo sprintf("%-20s: %s\n", "Magic", $info['magic']);
+    echo sprintf("%-20s: %s\n", "System ID", $info['system_id']);
+    echo sprintf("%-20s: %s\n", "System ID Match", $info['system_id_match'] ? "YES" : "NO (Warning: Cannot load on this system)");
+    echo sprintf("%-20s: %s bytes\n", "Memory Size", number_format($info['mem_size']));
+    echo sprintf("%-20s: %s bytes\n", "String Size", number_format($info['str_size']));
+    echo sprintf("%-20s: %s\n", "Timestamp", date("Y-m-d H:i:s", $info['timestamp']));
+    echo sprintf("%-20s: 0x%08X\n", "Checksum", $info['checksum']);
+
+    if ($info['system_id_match']) {
+        echo "--------------------------------------------------\n";
+        echo "Script Details:\n";
+        echo sprintf("%-20s: %d\n", "Functions", $info['num_functions'] ?? 0);
+        echo sprintf("%-20s: %d\n", "Classes", $info['num_classes'] ?? 0);
+        echo sprintf("%-20s: %d\n", "Early Bindings", $info['num_early_bindings'] ?? 0);
+
+        if (isset($info['metadata_size'])) {
+            echo "--------------------------------------------------\n";
+            echo "Logical Subdivisions (Memory Partitioning):\n";
+            echo sprintf("%-20s: %d bytes\n", "Metadata Area", $info['metadata_size']);
+            echo sprintf("%-20s: %d bytes\n", "Code Area", $info['code_size']);
+            echo sprintf("%-20s: %d bytes\n", "Data Area", $info['data_size']);
+            echo sprintf("%-20s: %d bytes\n", "Misc Area", $info['misc_size']);
+        }
+
+        if (!empty($info['constants'])) {
+            echo "--------------------------------------------------\n";
+            echo "Constants List:\n";
+            foreach ($info['constants'] as $const) {
+                if (is_array($const)) {
+                    echo "  - const " . $const['name'] . "\n";
+                } else {
+                    echo "  - const $const\n";
+                }
+            }
+        }
+
+        if (!empty($info['functions'])) {
+            echo "--------------------------------------------------\n";
+            echo "Functions List:\n";
+            foreach ($info['functions'] as $func) {
+                if (is_array($func)) {
+                    echo "  - " . $func['name'] . ($func['signature'] ?? '()') . "\n";
+                } else {
+                    echo "  - $func\n";
+                }
+            }
+        }
+
+        if (!empty($info['classes'])) {
+            echo "--------------------------------------------------\n";
+            echo "Classes List:\n";
+            foreach ($info['classes'] as $class) {
+                if (is_array($class)) {
+                    echo "  - Class " . $class['name'] . "\n";
+                    if (!empty($class['properties'])) {
+                        foreach ($class['properties'] as $prop) {
+                            $pname = is_array($prop) ? $prop['name'] : $prop;
+                            echo "      * Property: $$pname\n";
+                        }
+                    }
+                    if (!empty($class['methods'])) {
+                        foreach ($class['methods'] as $method) {
+                            echo "      * Method: " . $method['name'] . ($method['signature'] ?? '()') . "\n";
+                        }
+                    }
+                    if (!empty($class['constants'])) {
+                        foreach ($class['constants'] as $cname) {
+                            echo "      * Class Constant: $cname\n";
+                        }
+                    }
+                } else {
+                    echo "  - $class\n";
+                }
+            }
+        }
+    }
+
+    if (isset($info['structure'])) {
+        echo "--------------------------------------------------\n";
+        echo "Memory Layout:\n";
+        echo sprintf("%-30s %-14s %-14s %-12s\n", "Name", "Start", "End", "Size");
+
+        $structure = $info['structure'];
+        // Sort by start address, and by size descending if start addresses are equal
+        usort($structure, function($a, $b) {
+            if ($a['start'] === $b['start']) {
+                return $b['size'] <=> $a['size'];
+            }
+            return $a['start'] <=> $b['start'];
+        });
+
+        $stack = [];
+        foreach ($structure as $block) {
+            // Pop parent blocks that do not contain the current block
+            while (!empty($stack) && $block['start'] >= end($stack)['end']) {
+                array_pop($stack);
+            }
+
+            $indent = str_repeat("  ", count($stack));
+            $displayName = $indent . $block['name'];
+            if (strlen($displayName) > 30) {
+                $displayName = substr($displayName, 0, 27) . "...";
+            }
+
+            // Check for abnormal overlap (not fully nested)
+            $isOverlap = false;
+            if (!empty($stack)) {
+                $parent = end($stack);
+                if ($block['end'] > $parent['end']) {
+                    $isOverlap = true;
+                }
+            }
+
+            echo sprintf("%-30s 0x%08X     0x%08X     %s bytes%s\n",
+                $displayName,
+                $block['start'],
+                $block['end'],
+                number_format($block['size']),
+                $isOverlap ? " [OVERLAP!]" : ""
+            );
+
+            // If the current block might contain subsequent blocks, push it onto the stack
+            $stack[] = $block;
+        }
+    }
+    echo "--------------------------------------------------\n";
+}

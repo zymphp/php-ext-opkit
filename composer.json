@@ -1,0 +1,36 @@
+{
+    "name": "zymphp/opkit",
+    "description": "OpKit is a high-performance Opcode cache and pre-compilation extension for PHP.",
+    "type": "composer-plugin",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Eno-CN",
+            "email": "Eno_CN@qq.com"
+        }
+      ],
+    "require": {
+        "php": ">=8.1",
+        "composer-plugin-api": "^2.0"
+    },
+    "scripts": {
+        "opkit-build": "OpKit\\Composer\\BuildCommand::executeCommand"
+    },
+    "autoload": {
+        "psr-4": {
+            "OpKit\\Composer\\": "composer/src/"
+        },
+        "files": [
+            "stubs/opkit.php"
+        ]
+    },
+    "extra": {
+        "class": "OpKit\\Composer\\Plugin",
+        "capabilities": {
+            "Composer\\Plugin\\Capability\\CommandProvider": "OpKit\\Composer\\CommandProvider"
+        }
+    },
+    "bin": [
+        "bin/phpc"
+    ]
+}
