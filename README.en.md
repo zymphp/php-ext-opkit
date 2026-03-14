@@ -26,6 +26,12 @@ OpKit (Opcode Toolkit) is an **experimental** Opcode pre-compilation and persist
 - **Flexible Bootstrapping**: `opkit_boot` supports custom entry functions (default is `main`) and dynamic parameter passing.
 - **Error Tolerance**: Automatically skips erroneous files during batch compilation and provides ParseError line numbers and cause identification.
 
+## 📋 Requirements
+
+- **PHP Version**: Supports PHP 8.2 and 8.3.
+- **Build Tools**: Requires `phpize`, `php-config`, `make`, and a C compiler (e.g., `gcc`).
+- **Runtime Dependency**: OpKit must be loaded as a **Zend Extension** and is incompatible with `Zend OPcache`.
+
 ---
 
 ## 🛠️ Compilation and Installation

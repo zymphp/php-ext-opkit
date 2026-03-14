@@ -26,6 +26,12 @@ OpKit (Opcode Toolkit) 是一个处于 **实验阶段** 的 PHP Opcode 预编译
 - **灵活引导**: `opkit_boot` 支持自定义入口函数（默认为 `main`）并支持参数传递。
 - **错误容忍**: 在批量编译中自动跳过错误文件，并提供 ParseError 行号和原因定位。
 
+## 📋 环境要求
+
+- **PHP 版本**: 支持 PHP 8.2 和 8.3。
+- **构建工具**: 需要安装 `phpize`、`php-config`、`make` 以及 C 编译器（如 `gcc`）。
+- **运行依赖**: OpKit 必须作为 **Zend Extension** 加载，且与 `Zend OPcache` 互斥。
+
 ---
 
 ## 🛠️ 编译安装
