@@ -13,7 +13,7 @@ OpKit (Opcode Toolkit) 是一个处于 **实验阶段** 的 PHP Opcode 预编译
 - **常量支持**: 覆盖 `define()`、全局 `const` 以及类常量的跨请求持久化。
 
 ### 2. 自动化构建工具 (phpc)
-- **增量编译**: 智能比对源码与编译产物的修改时间，仅重编译变动文件，提升大型项目构建效率。
+- **增量编译**: 智能比对源码修改时间、PHP 环境 System ID 以及二进制文件 Magic 值，仅重编译变动或不兼容的文件，提升大型项目构建效率。
 - **配置驱动**: 支持 `opkit.json` 管理任务，支持参数继承与覆盖。
 - **并发安全**: 采用原子性写入（临时文件 + 原子重命名）和排他锁，提高构建过程的可靠性。
 - **性能分析**: 内置 Profiling 功能，提供文件级编译耗时统计。
@@ -139,13 +139,20 @@ composer require zymphp/opkit
 ### 2. 配置与自动编译
 插件会自动寻找根目录下的 `opkit.json` 进行编译。你只需在 `composer.json` 中配置好该文件，后续的所有安装/更新操作都会自动更新编译产物。
 
-此外，该插件还提供了 `opkit-build` 命令，用于从源码编译扩展：
+此外，该插件还提供了以下命令，用于从源码管理扩展：
 
 ```bash
+# 编译扩展
 composer opkit-build
+
+# 安装扩展 (支持自动调用 sudo 并提示输入密码)
+composer opkit-install
+
+# 清理编译产物
+composer opkit-clean
 ```
 
-> **提示**：如果命令未找到，请确保已执行 `composer install`。该命令会自动探测并优先使用与运行 `composer` 的 PHP 版本相匹配的 `phpize` 和 `php-config` 工具进行构建。
+> **提示**：如果命令未找到，请确保已执行 `composer install`。这些命令会自动探测并优先使用与运行 `composer` 的 PHP 版本相匹配的构建工具。
 
 ---
 
@@ -180,7 +187,7 @@ composer opkit-build
   1. 注册所有已加载脚本的符号（类、函数、常量）。
   2. 执行各脚本的顶层指令（如 `define`）。
   3. 调用 `$entry` 指定的入口函数（默认为全局 `main`）。
-  4. 返回入口函数的返回值。
+  4. 返回入口函数的返回值。若未加载脚本、找不到入口函数或调用失败，将抛出异常。
 
 ### 调试与分析
 - `opkit_get_info(string $filename): ?array`

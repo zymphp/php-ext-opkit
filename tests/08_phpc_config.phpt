@@ -54,6 +54,7 @@ rmdir($workDir);
 Running phpc with config...
 --------------------------------------------------
 OpKit is compiling (incremental mode)...
+PHP Version: %s
 Source: %s/src
 Output: %s/out
 --------------------------------------------------

@@ -1,28 +1,11 @@
 <?php
 namespace OpKit\Composer;
 
-use Composer\Command\BaseCommand;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
 
-class BuildCommand extends BaseCommand
+class BuildCommand extends BaseOpKitCommand
 {
-    public static function executeCommand($event)
-    {
-        $command = new self();
-        $command->setComposer($event->getComposer());
-        $command->setIO($event->getIO());
-
-        $io = $event->getIO();
-        $input = $io->isInteractive() ? new \Symfony\Component\Console\Input\ArgvInput([]) : new \Symfony\Component\Console\Input\ArrayInput([]);
-
-        // ConsoleIO implements IOInterface, but execute needs OutputInterface.
-        // In Composer context, we can use the Symfony application to get the output.
-        $output = new \Symfony\Component\Console\Output\ConsoleOutput();
-
-        return $command->execute($input, $output);
-    }
-
     protected function configure()
     {
         $this->setName('opkit-build')
@@ -33,6 +16,7 @@ class BuildCommand extends BaseCommand
     {
         $io = $this->getIO();
         $io->write("<info>OpKit: Starting extension build process...</info>");
+        $io->write("<info>PHP Version: " . PHP_VERSION . " (" . PHP_BINARY . ")</info>");
 
         $extensionDir = $this->getExtensionDir();
         if (!$extensionDir || !file_exists($extensionDir . DIRECTORY_SEPARATOR . 'config.m4')) {
@@ -43,17 +27,8 @@ class BuildCommand extends BaseCommand
             return 1;
         }
 
-        // Check for required tools
-        $phpBinDir = dirname(PHP_BINARY);
-        $phpize = $phpBinDir . DIRECTORY_SEPARATOR . 'phpize';
-        $phpConfig = $phpBinDir . DIRECTORY_SEPARATOR . 'php-config';
-
-        if (!is_executable($phpize)) {
-            $phpize = 'phpize';
-        }
-        if (!is_executable($phpConfig)) {
-            $phpConfig = 'php-config';
-        }
+        $phpize = $this->getPhpize();
+        $phpConfig = $this->getPhpConfig();
 
         $tools = [$phpize, 'make'];
         foreach ($tools as $tool) {
@@ -83,65 +58,10 @@ class BuildCommand extends BaseCommand
         $this->runProcess("make -j" . $this->getNproc(), $extensionDir, $io);
 
         $io->write("\n<info>OpKit extension built successfully!</info>");
-        $io->write("To install, run: <comment>sudo make install</comment> in $extensionDir");
+        $io->write("To install, run: <comment>composer opkit-install</comment>");
         $io->write("Then add <comment>zend_extension=opkit.so</comment> to your php.ini.");
 
         return 0;
-    }
-
-    protected function getExtensionDir()
-    {
-        // 1. Try relative to this file (development mode)
-        $dir = dirname(__DIR__, 2);
-        if (file_exists($dir . DIRECTORY_SEPARATOR . 'config.m4')) {
-            return realpath($dir);
-        }
-
-        // 2. Try to find the package directory from Composer's repository
-        $composer = $this->getComposer();
-        if ($composer) {
-            $package = $composer->getRepositoryManager()
-                ->getLocalRepository()
-                ->findPackage('zymphp/opkit', '*');
-
-            if ($package) {
-                $installPath = $composer->getInstallationManager()
-                    ->getInstallPath($package);
-                if ($installPath && file_exists($installPath . DIRECTORY_SEPARATOR . 'config.m4')) {
-                    return realpath($installPath);
-                }
-            }
-        }
-
-        return null;
-    }
-
-    protected function runProcess($command, $cwd, $io)
-    {
-        $descriptorspec = [
-            0 => ["pipe", "r"],
-            1 => ["pipe", "w"],
-            2 => ["pipe", "w"]
-        ];
-
-        $process = proc_open($command, $descriptorspec, $pipes, $cwd);
-        if (is_resource($process)) {
-            while ($s = fgets($pipes[1])) {
-                $io->write($s, false);
-            }
-            while ($s = fgets($pipes[2])) {
-                $io->writeError("<error>$s</error>", false);
-            }
-            fclose($pipes[0]);
-            fclose($pipes[1]);
-            fclose($pipes[2]);
-            $returnVar = proc_close($process);
-            if ($returnVar !== 0) {
-                throw new \Exception("Command '$command' failed with exit code $returnVar");
-            }
-        } else {
-            throw new \Exception("Could not start process: $command");
-        }
     }
 
     protected function getNproc()

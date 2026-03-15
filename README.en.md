@@ -13,7 +13,7 @@ OpKit (Opcode Toolkit) is an **experimental** Opcode pre-compilation and persist
 - **Constants Support**: Comprehensive cross-request persistence for `define()`, global `const`, and class constants.
 
 ### 2. Automated Build Tool (phpc)
-- **Incremental Compilation**: Intelligently compares modification times of source code and compilation products, recompiling only changed files, improving build efficiency for large projects.
+- **Incremental Compilation**: Intelligently compares source modification times, PHP environment System ID, and binary file Magic value, recompiling only changed or incompatible files, improving build efficiency for large projects.
 - **Configuration-driven**: Supports `opkit.json` for managing tasks, with support for parameter inheritance and overrides.
 - **Concurrency Safety**: Uses atomic writes (temporary files + atomic renaming) and exclusive locks to improve the reliability of the build process.
 - **Performance Profiling**: Built-in profiling feature providing file-level compilation time statistics.
@@ -139,13 +139,20 @@ composer require zymphp/opkit
 ### 2. Configuration and Auto-compilation
 The plugin automatically looks for `opkit.json` in the project root for compilation. You only need to configure this file in `composer.json`, and all subsequent installation/update operations will automatically update the compilation products.
 
-Additionally, the plugin provides the `opkit-build` command to compile the extension from source:
+Additionally, the plugin provides the following commands for managing the extension from source:
 
 ```bash
+# Build the extension
 composer opkit-build
+
+# Install the extension (supports automatic sudo and password prompt)
+composer opkit-install
+
+# Clean build artifacts
+composer opkit-clean
 ```
 
-> **Tip**: If the command is not found, ensure that `composer install` has been executed. This command automatically detects and prioritizes the use of `phpize` and `php-config` tools that match the PHP version running `composer` for building.
+> **Tip**: If a command is not found, ensure that `composer install` has been executed. These commands automatically detect and prioritize the use of build tools that match the PHP version running `composer`.
 
 ---
 
@@ -180,7 +187,7 @@ For the `.phpc` binary files you compile, you can use the `phpc --stubs <dir>` c
   1. Registers symbols (classes, functions, constants) from all loaded scripts.
   2. Executes top-level instructions (e.g., `define`) of each script.
   3. Calls the entry function specified by `$entry` (defaults to global `main`).
-  4. Returns the return value of the entry function.
+  4. Returns the return value of the entry function. Throws exceptions if no script is loaded, the entry point is not found, or the call fails.
 
 ### Debugging and Analysis
 - `opkit_get_info(string $filename): ?array`

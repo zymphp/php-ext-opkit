@@ -9,6 +9,8 @@ class CommandProvider implements CommandProviderCapability
     {
         return [
             new BuildCommand(),
+            new CleanCommand(),
+            new InstallCommand(),
         ];
     }
 }

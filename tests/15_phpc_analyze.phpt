@@ -38,6 +38,7 @@ foreach (glob("$target/*") as $f) @unlink($f);
 --EXPECTF--
 --------------------------------------------------
 OpKit is compiling (incremental mode) [force]...
+PHP Version: %s
 Source: %s
 Output: %s
 --------------------------------------------------

@@ -50,6 +50,7 @@ rmdir($workDir);
 First compilation:
 --------------------------------------------------
 OpKit is compiling (incremental mode)...
+PHP Version: %s
 Source: %s/src
 Output: %s/out
 --------------------------------------------------
@@ -61,6 +62,7 @@ Compilation complete: Success 1, Skipped 0, Failed 0 (Total time: %fs)
 Second compilation (no changes):
 --------------------------------------------------
 OpKit is compiling (incremental mode)...
+PHP Version: %s
 Source: %s/src
 Output: %s/out
 --------------------------------------------------
@@ -71,6 +73,7 @@ Compilation complete: Success 0, Skipped 1, Failed 0 (Total time: %fs)
 Third compilation (after change):
 --------------------------------------------------
 OpKit is compiling (incremental mode)...
+PHP Version: %s
 Source: %s/src
 Output: %s/out
 --------------------------------------------------
@@ -82,6 +85,7 @@ Compilation complete: Success 1, Skipped 0, Failed 0 (Total time: %fs)
 Fourth compilation (force):
 --------------------------------------------------
 OpKit is compiling (incremental mode) [force]...
+PHP Version: %s
 Source: %s/src
 Output: %s/out
 --------------------------------------------------

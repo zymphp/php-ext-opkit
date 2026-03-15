@@ -14,7 +14,9 @@
         "composer-plugin-api": "^2.0"
     },
     "scripts": {
-        "opkit-build": "OpKit\\Composer\\BuildCommand::executeCommand"
+        "opkit-build": "OpKit\\Composer\\BuildCommand::executeCommand",
+        "opkit-clean": "OpKit\\Composer\\CleanCommand::executeCommand",
+        "opkit-install": "OpKit\\Composer\\InstallCommand::executeCommand"
     },
     "autoload": {
         "psr-4": {

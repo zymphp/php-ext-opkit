@@ -145,6 +145,7 @@ if ($can_compile) {
 
     echo "--------------------------------------------------\n";
     echo "OpKit is compiling" . ($incremental ? " (incremental mode)" : "") . ($force ? " [force]" : "") . "...\n";
+    echo "PHP Version: " . PHP_VERSION . " (" . PHP_SAPI . ")\n";
     echo "Source: $abs_src\n";
     echo "Output: $abs_output\n";
     echo "--------------------------------------------------\n";
@@ -168,9 +169,12 @@ if ($can_compile) {
 
                 $should_compile = true;
                 if ($incremental && !$force && file_exists($target_file)) {
-                    // Compare mtime
+                    // Compare mtime and check system compatibility
                     if (filemtime($src_file) <= filemtime($target_file)) {
-                        $should_compile = false;
+                        $info = opkit_get_info($target_file);
+                        if ($info && $info['system_id_match']) {
+                            $should_compile = false;
+                        }
                     }
                 }
 
@@ -206,7 +210,10 @@ if ($can_compile) {
         $should_compile = true;
         if ($incremental && !$force && file_exists($target_file)) {
             if (filemtime($abs_src) <= filemtime($target_file)) {
-                $should_compile = false;
+                $info = opkit_get_info($target_file);
+                if ($info && $info['system_id_match']) {
+                    $should_compile = false;
+                }
             }
         }
 
