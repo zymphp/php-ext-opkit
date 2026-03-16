@@ -26,14 +26,6 @@
 
 #include "php.h"
 
-#if PHP_VERSION_ID < 80200 || PHP_VERSION_ID >= 80400
-# if PHP_VERSION_ID < 80200
-#  error "OpKit extension requires PHP 8.2 or newer"
-# else
-#  error "OpKit extension does not yet support PHP 8.4 or 8.5 (support is planned)"
-# endif
-#endif
-
 #define OPKIT_EXTENSION_NAME	"OPkit"
 #define OPKIT_EXTENSION_VERSION	"0.0.1-dev"
 
