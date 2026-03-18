@@ -32,6 +32,7 @@ tests/test_*/
 # OpKit specific
 *.phpc
 *.phar
+AI_DEV_ENV.md
 
 # Composer
 vendor/
