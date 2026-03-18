@@ -34,6 +34,7 @@ tests/test_*/
 *.phpc
 *.phar
 AI_DEV_ENV.md
+CLAUDE.md
 php-src
 
 # Composer
