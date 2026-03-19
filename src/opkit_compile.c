@@ -911,7 +911,9 @@ static void zend_file_cache_unserialize_prop_info(zval *zv, zend_persistent_scri
 				UNSERIALIZE_STR(prop->doc_comment);
 #endif
 				UNSERIALIZE_ATTRIBUTES(prop->attributes);
+#if PHP_VERSION_ID >= 80400
 				UNSERIALIZE_PTR(prop->prototype);
+#endif
 #if PHP_VERSION_ID >= 80400
 				if (prop->hooks) {
 					UNSERIALIZE_PTR(prop->hooks);
