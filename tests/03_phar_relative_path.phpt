@@ -1,10 +1,13 @@
 --TEST--
-OpKit: Relative path support (without Phar)
+OpKit: Phar relative path support
 --EXTENSIONS--
 opkit
+phar
+--INI--
+phar.readonly=0
 --FILE--
 <?php
-$base_dir = __DIR__ . "/test_03_src";
+$base_dir = __DIR__ . "/test_03_phar_src";
 @mkdir($base_dir, 0777, true);
 @mkdir($base_dir . "/app/core", 0777, true);
 
@@ -13,6 +16,14 @@ file_put_contents($base_dir . "/app/core/Application.php", <<<'PHP'
 namespace App\Core;
 class Application {
     public function run() {
+        echo "Phar running: [" . \Phar::running() . "]\n";
+        // 过滤掉绝对路径部分，只保留 phar://...app.phar/app/core/Application.php
+        $file = __FILE__;
+        if (strpos($file, 'phar://') === 0) {
+            echo "Current file: " . substr($file, strrpos($file, 'app.phar')) . "\n";
+        } else {
+            echo "Current file: " . $file . "\n";
+        }
         echo "Application is running from namespace!\n";
     }
 }
@@ -29,14 +40,22 @@ function main() {
 PHP
 );
 
-$output_dir = __DIR__ . "/test_03_target";
+$output_dir = __DIR__ . "/test_03_phar_target";
 @mkdir($output_dir, 0777, true);
 
 if (opkit_compile_dir($output_dir, $base_dir)) {
     opkit_gen_entry_file($output_dir . "/entry.php");
 
-    // 直接运行编译后的文件（不打包成 phar）
-    include $output_dir . "/entry.php";
+    $phar_file = __DIR__ . "/app.phar";
+    if (file_exists($phar_file)) unlink($phar_file);
+
+    $phar = new Phar($phar_file);
+    $phar->buildFromDirectory($output_dir);
+    $phar->setStub($phar->createDefaultStub('entry.php'));
+    unset($phar);
+
+    // 运行 Phar
+    include $phar_file;
 }
 
 function rmrf($dir) {
@@ -49,13 +68,17 @@ function rmrf($dir) {
 }
 rmrf($base_dir);
 rmrf($output_dir);
+if (file_exists($phar_file)) unlink($phar_file);
 ?>
---EXPECT--
+--EXPECTF--
+Phar running: [%s/app.phar]
+Current file: app.phar/app/core/Application.php
 Application is running from namespace!
 --CLEAN--
 <?php
-$base_dir = __DIR__ . "/test_03_src";
-$output_dir = __DIR__ . "/test_03_target";
+$base_dir = __DIR__ . "/test_03_phar_src";
+$target_dir = __DIR__ . "/test_03_phar_target";
+$phar_file = __DIR__ . "/app.phar";
 function rmrf($dir) {
     if (!is_dir($dir)) return;
     $files = array_diff(scandir($dir), array('.', '..'));
@@ -65,5 +88,6 @@ function rmrf($dir) {
     return rmdir($dir);
 }
 rmrf($base_dir);
-rmrf($output_dir);
+rmrf($target_dir);
+if (file_exists($phar_file)) unlink($phar_file);
 ?>

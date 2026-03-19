@@ -376,7 +376,9 @@ static void zend_file_cache_serialize_op_array(zend_op_array *op_array, zend_per
 	}
 	SERIALIZE_STR(op_array->function_name);
 	SERIALIZE_STR(op_array->filename);
+#if PHP_VERSION_ID < 80400
 	SERIALIZE_STR(op_array->doc_comment);
+#endif
 	if (op_array->vars) {
 		zend_string **vars;
 		uint32_t i;
@@ -437,7 +439,9 @@ static void zend_file_cache_serialize_class_constant(zval *zv, zend_persistent_s
 	c = UNSERIALIZED_PTR(c);
 	if (c) {
 		zend_file_cache_serialize_zval(&c->value, script, info, buf);
+#if PHP_VERSION_ID < 80400
 		SERIALIZE_STR(c->doc_comment);
+#endif
 		SERIALIZE_ATTRIBUTES(c->attributes);
 #if PHP_VERSION_ID >= 80300
 		zend_file_cache_serialize_type(&c->type, script, info, buf);
@@ -454,10 +458,26 @@ static void zend_file_cache_serialize_prop_info(zval *zv, zend_persistent_script
 	prop = UNSERIALIZED_PTR(prop);
 	if (prop) {
 		SERIALIZE_STR(prop->name);
+#if PHP_VERSION_ID < 80400
 		SERIALIZE_STR(prop->doc_comment);
+#endif
 		zend_file_cache_serialize_type(&prop->type, script, info, buf);
 		SERIALIZE_ATTRIBUTES(prop->attributes);
 		SERIALIZE_PTR(prop->ce);
+#if PHP_VERSION_ID >= 80400
+		/* Serialize property prototype */
+		SERIALIZE_PTR(prop->prototype);
+		/* Serialize property hooks */
+		if (prop->hooks) {
+			zend_function **hooks = prop->hooks;
+			SERIALIZE_PTR(prop->hooks);
+			for (uint32_t i = 0; i < ZEND_PROPERTY_HOOK_COUNT; i++) {
+				if (hooks[i]) {
+					SERIALIZE_PTR(hooks[i]);
+				}
+			}
+		}
+#endif
 	}
 }
 
@@ -506,7 +526,9 @@ static void zend_file_cache_serialize_class(zval *zv, zend_persistent_script *sc
 
 	if (ce->type == ZEND_USER_CLASS) {
 		SERIALIZE_STR(ce->info.user.filename);
+#if PHP_VERSION_ID < 80400
 		SERIALIZE_STR(ce->info.user.doc_comment);
+#endif
 	}
 	SERIALIZE_ATTRIBUTES(ce->attributes);
 }
@@ -718,7 +740,7 @@ static void zend_file_cache_unserialize_attribute(zval *zv, zend_persistent_scri
 	}
 }
 
-static void zend_file_cache_unserialize_type(zend_type *type, zend_persistent_script *script, void *buf)
+static void zend_file_cache_unserialize_type(zend_type *type, zend_class_entry *scope, zend_persistent_script *script, void *buf)
 {
 	if (ZEND_TYPE_HAS_LIST(*type)) {
 		zend_type_list *list = ZEND_TYPE_LIST(*type);
@@ -726,7 +748,7 @@ static void zend_file_cache_unserialize_type(zend_type *type, zend_persistent_sc
 		UNSERIALIZE_PTR(list);
 		ZEND_TYPE_SET_PTR(*type, list);
 		for (i = 0; i < list->num_types; i++) {
-			zend_file_cache_unserialize_type(&list->types[i], script, buf);
+			zend_file_cache_unserialize_type(&list->types[i], scope, script, buf);
 		}
 	} else if (ZEND_TYPE_HAS_NAME(*type)) {
 		zend_string *type_name = ZEND_TYPE_NAME(*type);
@@ -824,12 +846,14 @@ static void zend_file_cache_unserialize_op_array(zend_op_array *op_array, zend_p
 		}
 		for (i = 0; i < num_args; i++) {
 			UNSERIALIZE_STR(arg_info[i].name);
-			zend_file_cache_unserialize_type(&arg_info[i].type, script, buf);
+			zend_file_cache_unserialize_type(&arg_info[i].type, op_array->scope, script, buf);
 		}
 	}
 	UNSERIALIZE_STR(op_array->function_name);
 	UNSERIALIZE_STR(op_array->filename);
+#if PHP_VERSION_ID < 80400
 	UNSERIALIZE_STR(op_array->doc_comment);
+#endif
 	UNSERIALIZE_PTR(op_array->vars);
 	if (op_array->vars) {
 		for (int i = 0; i < op_array->last_var; i++) {
@@ -852,31 +876,56 @@ static void zend_file_cache_unserialize_op_array(zend_op_array *op_array, zend_p
 
 static void zend_file_cache_unserialize_class_constant(zval *zv, zend_persistent_script *script, void *buf)
 {
-	zend_class_constant *c;
-	UNSERIALIZE_PTR(Z_PTR_P(zv));
-	c = Z_PTR_P(zv);
-	if (c) {
-		zend_file_cache_unserialize_zval(&c->value, script, buf);
-		UNSERIALIZE_STR(c->doc_comment);
-		UNSERIALIZE_ATTRIBUTES(c->attributes);
-#if PHP_VERSION_ID >= 80300
-		zend_file_cache_unserialize_type(&c->type, script, buf);
+	if (!IS_UNSERIALIZED(Z_PTR_P(zv))) {
+		zend_class_constant *c;
+		UNSERIALIZE_PTR(Z_PTR_P(zv));
+		c = Z_PTR_P(zv);
+		if (c) {
+			if (!IS_UNSERIALIZED(c->ce)) {
+				UNSERIALIZE_PTR(c->ce);
+				zend_file_cache_unserialize_zval(&c->value, script, buf);
+#if PHP_VERSION_ID < 80400
+				UNSERIALIZE_STR(c->doc_comment);
 #endif
-		UNSERIALIZE_PTR(c->ce);
+				UNSERIALIZE_ATTRIBUTES(c->attributes);
+#if PHP_VERSION_ID >= 80300
+				zend_file_cache_unserialize_type(&c->type, c->ce, script, buf);
+#endif
+			}
+		}
 	}
 }
 
 static void zend_file_cache_unserialize_prop_info(zval *zv, zend_persistent_script *script, void *buf)
 {
-	zend_property_info *prop;
-	UNSERIALIZE_PTR(Z_PTR_P(zv));
-	prop = Z_PTR_P(zv);
-	if (prop) {
-		UNSERIALIZE_STR(prop->name);
-		UNSERIALIZE_STR(prop->doc_comment);
-		zend_file_cache_unserialize_type(&prop->type, script, buf);
-		UNSERIALIZE_ATTRIBUTES(prop->attributes);
-		UNSERIALIZE_PTR(prop->ce);
+	if (!IS_UNSERIALIZED(Z_PTR_P(zv))) {
+		zend_property_info *prop;
+		UNSERIALIZE_PTR(Z_PTR_P(zv));
+		prop = Z_PTR_P(zv);
+		if (prop) {
+			/* PHP 8.4 uses prop->ce being serialized as indicator that prop needs unserialization */
+			if (!IS_UNSERIALIZED(prop->ce)) {
+				UNSERIALIZE_PTR(prop->ce);
+				UNSERIALIZE_STR(prop->name);
+#if PHP_VERSION_ID < 80400
+				UNSERIALIZE_STR(prop->doc_comment);
+#endif
+				UNSERIALIZE_ATTRIBUTES(prop->attributes);
+				UNSERIALIZE_PTR(prop->prototype);
+#if PHP_VERSION_ID >= 80400
+				if (prop->hooks) {
+					UNSERIALIZE_PTR(prop->hooks);
+					for (uint32_t i = 0; i < ZEND_PROPERTY_HOOK_COUNT; i++) {
+						if (prop->hooks[i]) {
+							UNSERIALIZE_PTR(prop->hooks[i]);
+							zend_file_cache_unserialize_op_array(&prop->hooks[i]->op_array, script, buf);
+						}
+					}
+				}
+#endif
+				zend_file_cache_unserialize_type(&prop->type, prop->ce, script, buf);
+			}
+		}
 	}
 }
 
@@ -908,7 +957,9 @@ static void zend_file_cache_unserialize_class(zval *zv, zend_persistent_script *
 
 	if (ce->type == ZEND_USER_CLASS) {
 		UNSERIALIZE_STR(ce->info.user.filename);
+#if PHP_VERSION_ID < 80400
 		UNSERIALIZE_STR(ce->info.user.doc_comment);
+#endif
 	}
 	UNSERIALIZE_ATTRIBUTES(ce->attributes);
 }

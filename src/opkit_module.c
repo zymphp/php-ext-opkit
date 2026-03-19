@@ -54,6 +54,7 @@ zend_string_table opkit_interned_strings;
 typedef struct _opkit_script_node {
 	zend_persistent_script *script;
 	void *mem_to_free;
+	bool executed;
 	struct _opkit_script_node *next;
 } opkit_script_node;
 
@@ -132,12 +133,17 @@ void opkit_clean_script_items(zend_persistent_script *script) {
 		} ZEND_HASH_FOREACH_END();
 		EG(zend_constants)->pDestructor = orig_dtor;
 	}
+
+	/* Runtime cache cleanup disabled - causes crashes with invalid pointers
+	 * The memory is freed anyway when the entire script memory is freed
+	 */
 }
 
 void opkit_keep_memory(zend_persistent_script *script, void *mem_to_free) {
 	opkit_script_node *node = emalloc(sizeof(opkit_script_node));
 	node->script = script;
 	node->mem_to_free = mem_to_free;
+	node->executed = false;
 	node->next = loaded_scripts;
 	loaded_scripts = node;
 }
@@ -150,6 +156,31 @@ static void opkit_reset_script(void) {
 		next = node->next;
 		if (node->script) {
 			opkit_clean_script_items(node->script);
+
+			/* Clean up heap allocated runtime cache to prevent memory leaks
+			 * Only needed for PHP 8.4+ which uses heap allocation for runtime cache
+			 *
+			 * SAFETY: Only clean runtime cache when no classes are defined.
+			 * When classes are present (especially with constants), the runtime
+			 * cache may have a different memory layout that causes heap corruption
+			 * if manually freed. This is a known issue in PHP 8.4+ debug builds.
+			 */
+#if PHP_VERSION_ID >= 80400
+			if (node->executed) {
+				/* Check if script has classes - if so, skip runtime cache cleanup */
+				uint32_t num_classes = node->script->script.class_table.nNumOfElements;
+				if (num_classes == 0) {
+					zend_op_array *main_op_array = &node->script->script.main_op_array;
+					if (main_op_array->fn_flags & ZEND_ACC_HEAP_RT_CACHE) {
+						void *cache = ZEND_MAP_PTR(main_op_array->run_time_cache);
+						if (cache) {
+							efree(cache);
+							ZEND_MAP_PTR(main_op_array->run_time_cache) = NULL;
+						}
+					}
+				}
+			}
+#endif
 		}
 		if (node->mem_to_free) {
 			efree(node->mem_to_free);
@@ -1056,6 +1087,23 @@ ZEND_FUNCTION(opkit_boot) {
 					m->op_array.fn_flags &= ~ZEND_ACC_IMMUTABLE;
 				}
 			} ZEND_HASH_FOREACH_END();
+#if PHP_VERSION_ID >= 80400
+		// Fix Property Hooks immutability flags
+		zend_property_info *prop_info;
+		ZEND_HASH_FOREACH_PTR(&ce->properties_info, prop_info) {
+			if (prop_info->hooks) {
+				for (uint32_t i = 0; i < ZEND_PROPERTY_HOOK_COUNT; i++) {
+					zend_function *hook = prop_info->hooks[i];
+					if (hook && hook->type == ZEND_USER_FUNCTION) {
+						if (phar_prefix) {
+							opkit_fix_op_array_filenames(&hook->op_array, phar_prefix);
+						}
+						hook->op_array.fn_flags &= ~ZEND_ACC_IMMUTABLE;
+					}
+				}
+			}
+		} ZEND_HASH_FOREACH_END();
+#endif
 		} ZEND_HASH_FOREACH_END();
 
 		// 2. Register functions and fix
@@ -1114,6 +1162,9 @@ ZEND_FUNCTION(opkit_boot) {
 		zval retval;
 		zend_execute(main_op_array, &retval);
 		zval_ptr_dtor(&retval);
+
+		// Mark as executed so runtime cache cleanup will occur
+		node->executed = true;
 
 		node = node->next;
 	}
@@ -1240,7 +1291,8 @@ ZEND_FUNCTION(opkit_gen_entry_file) {
 	opkit_collect_phpc_files(stream, dir, base_dir_len);
 	php_stream_puts(stream, "]);\n");
 
-	php_stream_puts(stream, "\nexit(opkit_boot());\n");
+	php_stream_puts(stream, "\n$result = opkit_boot();\n");
+	php_stream_puts(stream, "exit($result ?? 0);\n");
 
 	php_stream_close(stream);
 	efree(dir);

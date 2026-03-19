@@ -43,3 +43,4 @@ composer.lock
 
 # Temp files
 *~
+/tmp/

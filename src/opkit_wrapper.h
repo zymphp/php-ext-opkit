@@ -37,6 +37,26 @@
 # define CONST_OWNED_BY_PERSISTENT_SCRIPT (1<<4)
 #endif
 
+/* --- PHP 8.4 Property Hooks Compatibility --- */
+#if PHP_VERSION_ID >= 80400
+#ifndef ZEND_PROPERTY_HOOK_COUNT
+# define ZEND_PROPERTY_HOOK_COUNT 2
+#endif
+#ifndef ZEND_PROPERTY_HOOK_STRUCT_SIZE
+# define ZEND_PROPERTY_HOOK_STRUCT_SIZE (sizeof(zend_function*) * ZEND_PROPERTY_HOOK_COUNT)
+#endif
+#endif
+
+/* --- PHP 8.4 doc_comment Compatibility --- */
+/* In PHP 8.4, doc_comment was removed from several structures */
+#if PHP_VERSION_ID >= 80400
+# define OPKIT_HAS_DOC_COMMENT(ptr) 0
+# define OPKIT_DOC_COMMENT(ptr) NULL
+#else
+# define OPKIT_HAS_DOC_COMMENT(ptr) ((ptr) != NULL)
+# define OPKIT_DOC_COMMENT(ptr) (ptr)
+#endif
+
 
 /* --- From zend_shared_alloc.h --- */
 #ifndef ZEND_SHARED_ALLOC_H

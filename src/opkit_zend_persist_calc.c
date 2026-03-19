@@ -288,13 +288,20 @@ static void zend_persist_op_array_calc_ex(zend_op_array *op_array)
 		ADD_SIZE_MS(sizeof(zend_live_range) * op_array->last_live_range);
 	}
 
+#if PHP_VERSION_ID < 80400
 	if (ZCG(accel_directives).save_comments && op_array->doc_comment) {
 		ADD_STRING(op_array->doc_comment);
 	}
+#endif
 
 	if (op_array->attributes) {
 		zend_persist_attributes_calc(op_array->attributes);
 	}
+#if PHP_VERSION_ID >= 80400
+	if (op_array->prop_info) {
+		ADD_SIZE_MS(sizeof(zend_property_info *));
+	}
+#endif
 
 	if (op_array->try_catch_array) {
 		ADD_SIZE_MS(sizeof(zend_try_catch_element) * op_array->last_try_catch);
@@ -374,12 +381,33 @@ static void zend_persist_property_info_calc(zend_property_info *prop)
 	ADD_SIZE(sizeof(zend_property_info));
 	ADD_INTERNED_STRING(prop->name);
 	zend_persist_type_calc(&prop->type);
+#if PHP_VERSION_ID < 80400
 	if (ZCG(accel_directives).save_comments && prop->doc_comment) {
 		ADD_STRING(prop->doc_comment);
 	}
+#endif
 	if (prop->attributes) {
 		zend_persist_attributes_calc(prop->attributes);
 	}
+#if PHP_VERSION_ID >= 80400
+	/* Property hooks memory calculation */
+	if (prop->hooks) {
+		ADD_SIZE(ZEND_PROPERTY_HOOK_STRUCT_SIZE);
+		for (uint32_t i = 0; i < ZEND_PROPERTY_HOOK_COUNT; i++) {
+			if (prop->hooks[i]) {
+				zend_function *hook = prop->hooks[i];
+				if (hook->type == ZEND_USER_FUNCTION) {
+					/* Check if already added via xlat table */
+					if (!zend_shared_alloc_get_xlat_entry(hook)) {
+						ADD_SIZE(sizeof(zend_op_array));
+						zend_persist_op_array_calc_ex(&hook->op_array);
+						zend_shared_alloc_register_xlat_entry(hook, hook);
+					}
+				}
+			}
+		}
+	}
+#endif
 }
 
 static void zend_persist_class_constant_calc(zval *zv)
@@ -395,9 +423,11 @@ static void zend_persist_class_constant_calc(zval *zv)
 		zend_shared_alloc_register_xlat_entry(c, c);
 		ADD_SIZE(sizeof(zend_class_constant));
 		zend_persist_zval_calc(&c->value);
+#if PHP_VERSION_ID < 80400
 		if (ZCG(accel_directives).save_comments && c->doc_comment) {
 			ADD_STRING(c->doc_comment);
 		}
+#endif
 		if (c->attributes) {
 			zend_persist_attributes_calc(c->attributes);
 		}
@@ -491,9 +521,11 @@ void zend_persist_class_entry_calc(zend_class_entry *ce)
 			ADD_STRING(ce->info.user.filename);
 		}
 
+#if PHP_VERSION_ID < 80400
 		if (ZCG(accel_directives).save_comments && ce->info.user.doc_comment) {
 			ADD_STRING(ce->info.user.doc_comment);
 		}
+#endif
 
 		if (ce->attributes) {
 			zend_persist_attributes_calc(ce->attributes);

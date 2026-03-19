@@ -89,6 +89,30 @@ void free_persistent_script(zend_persistent_script *persistent_script, int destr
 		destroy_op_array(&persistent_script->script.main_op_array);
 	}
 
+#if PHP_VERSION_ID >= 80400
+	/* PHP 8.4+ property hooks need to be explicitly destroyed to avoid memory leaks.
+	 * The hooks are op_arrays that were allocated during compilation but may not be
+	 * properly freed when classes are destroyed via ZEND_CLASS_DTOR.
+	 * Only destroy hooks that belong to this class (prop_info->ce == ce). */
+	{
+		zend_class_entry *ce;
+		ZEND_HASH_FOREACH_PTR(&persistent_script->script.class_table, ce) {
+			if (ce->type == ZEND_USER_CLASS) {
+				zend_property_info *prop_info;
+				ZEND_HASH_FOREACH_PTR(&ce->properties_info, prop_info) {
+					if (prop_info->ce == ce && prop_info->hooks) {
+						for (uint32_t i = 0; i < ZEND_PROPERTY_HOOK_COUNT; i++) {
+							if (prop_info->hooks[i]) {
+								destroy_op_array(&prop_info->hooks[i]->op_array);
+							}
+						}
+					}
+				} ZEND_HASH_FOREACH_END();
+			}
+		} ZEND_HASH_FOREACH_END();
+	}
+#endif
+
 	zend_hash_destroy(&persistent_script->script.function_table);
 	zend_hash_destroy(&persistent_script->script.class_table);
 	zend_hash_destroy(&op_script->constants_table);

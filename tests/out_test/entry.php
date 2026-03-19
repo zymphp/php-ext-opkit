@@ -18,5 +18,7 @@ opkit_load_multi([
 ]);
 
 
-exit(opkit_boot());
+$result = opkit_boot();
+
+exit($result ?? 0);
 

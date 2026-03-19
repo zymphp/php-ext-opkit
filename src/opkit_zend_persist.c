@@ -318,9 +318,11 @@ static void zend_persist_op_array_ex(zend_op_array *op_array, zend_persistent_sc
 		zend_accel_store_interned_string(op_array->filename);
 	}
 
+#if PHP_VERSION_ID < 80400
 	if (op_array->doc_comment) {
 		zend_accel_store_interned_string(op_array->doc_comment);
 	}
+#endif
 
 	if (op_array->arg_info) {
 		zend_arg_info *arg_info = op_array->arg_info;
@@ -426,7 +428,13 @@ static void zend_persist_op_array_ex(zend_op_array *op_array, zend_persistent_sc
 
 	if (op_array->cache_size) {
 		memset(ZCG(mem), 0, op_array->cache_size);
-		op_array->run_time_cache__ptr = (void**)(uintptr_t)((char*)ZCG(mem) - (char*)main_persistent_script->mem);
+		if (main_persistent_script) {
+			op_array->run_time_cache__ptr = (void**)(uintptr_t)((char*)ZCG(mem) - (char*)main_persistent_script->mem);
+		} else if (ZCG(current_persistent_script)) {
+			op_array->run_time_cache__ptr = (void**)(uintptr_t)((char*)ZCG(mem) - (char*)ZCG(current_persistent_script)->mem);
+		} else {
+			op_array->run_time_cache__ptr = NULL;
+		}
 		ZCG(mem) = (void*)((char*)ZCG(mem) + op_array->cache_size);
 	} else {
 		op_array->run_time_cache__ptr = NULL;
@@ -491,13 +499,36 @@ static zend_property_info *zend_persist_property_info(zend_property_info *prop)
 
 	copy = _opkit_shared_memdup_put_md(prop, sizeof(zend_property_info));
 	zend_accel_store_interned_string(copy->name);
+#if PHP_VERSION_ID < 80400
 	if (copy->doc_comment) {
 		zend_accel_store_interned_string(copy->doc_comment);
 	}
+#endif
 	zend_persist_type(&copy->type);
 	if (copy->attributes) {
 		copy->attributes = zend_persist_attributes(copy->attributes);
 	}
+#if PHP_VERSION_ID >= 80400
+	/* Persist property prototype */
+	if (copy->prototype) {
+		/* The prototype will be persisted later when processing the parent class's properties */
+		copy->prototype = zend_shared_alloc_get_xlat_entry((void *)copy->prototype);
+	}
+	/* Persist property hooks */
+	if (copy->hooks) {
+		zend_function **hooks = copy->hooks;
+		copy->hooks = _opkit_shared_memdup_put_md(hooks, ZEND_PROPERTY_HOOK_STRUCT_SIZE);
+		for (uint32_t i = 0; i < ZEND_PROPERTY_HOOK_COUNT; i++) {
+			if (copy->hooks[i]) {
+				zend_op_array *hook = (zend_op_array *)copy->hooks[i];
+				hook = zend_shared_memdup_put(hook, sizeof(zend_op_array));
+				hook->prop_info = copy;
+				zend_persist_op_array_ex(hook, ZCG(current_persistent_script));
+				copy->hooks[i] = (zend_function *)hook;
+			}
+		}
+	}
+#endif
 	return copy;
 }
 
@@ -513,9 +544,11 @@ static void zend_persist_class_constant(zval *zv, zend_class_entry *ce)
 	copy = _opkit_shared_memdup_put_md(c, sizeof(zend_class_constant));
 	copy->ce = ce;
 	zend_persist_zval(&copy->value);
+#if PHP_VERSION_ID < 80400
 	if (copy->doc_comment) {
 		zend_accel_store_interned_string(copy->doc_comment);
 	}
+#endif
 	if (copy->attributes) {
 		copy->attributes = zend_persist_attributes(copy->attributes);
 	}
@@ -647,9 +680,11 @@ zend_class_entry *zend_persist_class_entry(zend_class_entry *orig_ce)
 		ce->attributes = zend_persist_attributes(ce->attributes);
 	}
 
+#if PHP_VERSION_ID < 80400
 	if (ce->info.user.doc_comment) {
 		zend_accel_store_interned_string(ce->info.user.doc_comment);
 	}
+#endif
 
 	return ce;
 }
