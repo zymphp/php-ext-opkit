@@ -286,6 +286,9 @@ static bool opkit_do_compile_file(zend_string *output_path, zend_string *script_
 		persistent_script = opkit_compile_file(&file_handle, ZEND_REQUIRE, &op_array);
 		if (persistent_script) {
 			opkit_compile_script_store(output_path, persistent_script, base_path);
+			/* Free the original persistent_script to prevent access to corrupted
+			 * default_properties_table pointers. The persisted copy is in the file. */
+			// free_persistent_script(persistent_script, 0);
 			success = true;
 		}
 	} zend_catch {

@@ -244,6 +244,9 @@ static void zend_persist_zval(zval *z)
 				efree(old_ref);
 			}
 			break;
+	default:
+		/* IS_UNDEF, IS_NULL, IS_FALSE, IS_TRUE, IS_LONG, IS_DOUBLE, IS_RESOURCE */
+		break;
 	}
 }
 
@@ -295,6 +298,9 @@ static void zend_persist_type(zend_type *type)
 		zend_string *name = ZEND_TYPE_NAME(*type);
 		zend_accel_store_interned_string(name);
 		type->ptr = name;
+		if (!ZCG(current_persistent_script)->corrupted) {
+			zend_accel_get_class_name_map_ptr(name);
+		}
 	}
 }
 
@@ -560,10 +566,18 @@ static void zend_persist_class_constant(zval *zv, zend_class_entry *ce)
 
 zend_class_entry *zend_persist_class_entry(zend_class_entry *orig_ce)
 {
-	zend_class_entry *ce = zend_shared_alloc_get_xlat_entry(orig_ce);
-	if (ce) return ce;
+	zend_class_entry *ce = orig_ce;
+	if (ce->type != ZEND_USER_CLASS) {
+		return ce;
+	}
 
-	ce = _opkit_shared_memdup_put_md(orig_ce, sizeof(zend_class_entry));
+	/* The same zend_class_entry may be reused by class_alias */
+	zend_class_entry *new_ce = zend_shared_alloc_get_xlat_entry(ce);
+	if (new_ce) {
+		return new_ce;
+	}
+
+	ce = _opkit_shared_memdup_put_md(ce, sizeof(zend_class_entry));
 
 	zend_accel_store_interned_string(ce->name);
 	if (ce->parent_name) {
