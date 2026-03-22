@@ -503,7 +503,17 @@ static zend_property_info *zend_persist_property_info(zend_property_info *prop)
 	zend_property_info *copy = zend_shared_alloc_get_xlat_entry(prop);
 	if (copy) return copy;
 
+	ZEND_ASSERT(prop->ce != NULL && prop->name != NULL);
+
 	copy = _opkit_shared_memdup_put_md(prop, sizeof(zend_property_info));
+	zend_shared_alloc_register_xlat_entry(prop, copy);
+
+	/* Convert prop->ce through xlat table (for inherited properties) */
+	zend_class_entry *ce = zend_shared_alloc_get_xlat_entry(copy->ce);
+	if (ce) {
+		copy->ce = ce;
+	}
+
 	zend_accel_store_interned_string(copy->name);
 #if PHP_VERSION_ID < 80400
 	if (copy->doc_comment) {
@@ -548,7 +558,11 @@ static void zend_persist_class_constant(zval *zv, zend_class_entry *ce)
 	}
 
 	copy = _opkit_shared_memdup_put_md(c, sizeof(zend_class_constant));
-	copy->ce = ce;
+	/* Try to convert ce through xlat table (for inherited constants) */
+	zend_class_entry *new_ce = zend_shared_alloc_get_xlat_entry(copy->ce);
+	if (new_ce) {
+		copy->ce = new_ce;
+	}
 	zend_persist_zval(&copy->value);
 #if PHP_VERSION_ID < 80400
 	if (copy->doc_comment) {
@@ -592,14 +606,25 @@ zend_class_entry *zend_persist_class_entry(zend_class_entry *orig_ce)
 		}
 		zend_persist_class_method(&p->val, ce);
 	} ZEND_HASH_FOREACH_END();
+	HT_FLAGS(&ce->function_table) &= (HASH_FLAG_UNINITIALIZED | HASH_FLAG_STATIC_KEYS);
 
 	zend_hash_persist(&ce->properties_info);
 	ZEND_HASH_MAP_FOREACH_BUCKET(&ce->properties_info, p) {
+		zend_property_info *prop = Z_PTR(p->val);
 		if (p->key) {
 			zend_accel_store_interned_string(p->key);
 		}
-		ZVAL_PTR(&p->val, zend_persist_property_info(Z_PTR(p->val)));
+		if (prop->ce == orig_ce) {
+			ZVAL_PTR(&p->val, zend_persist_property_info(prop));
+		} else {
+			/* Inherit property from parent class */
+			prop = zend_shared_alloc_get_xlat_entry(prop);
+			if (prop) {
+				Z_PTR(p->val) = prop;
+			}
+		}
 	} ZEND_HASH_FOREACH_END();
+	HT_FLAGS(&ce->properties_info) &= (HASH_FLAG_UNINITIALIZED | HASH_FLAG_STATIC_KEYS);
 
 	if (ce->default_properties_table) {
 		void *old_table = ce->default_properties_table;
@@ -621,6 +646,25 @@ zend_class_entry *zend_persist_class_entry(zend_class_entry *orig_ce)
 		efree(old_table);
 	}
 
+	/* Persist properties_info_table - used for fast property lookup */
+	if (ce->properties_info_table) {
+		int i;
+		size_t size = sizeof(zend_property_info *) * ce->default_properties_count;
+		zend_property_info **old_table = ce->properties_info_table;
+		ce->properties_info_table = _opkit_shared_memdup_put_md(ce->properties_info_table, size);
+		efree(old_table);
+
+		for (i = 0; i < ce->default_properties_count; i++) {
+			if (ce->properties_info_table[i]) {
+				zend_property_info *prop_info = zend_shared_alloc_get_xlat_entry(
+					ce->properties_info_table[i]);
+				if (prop_info) {
+					ce->properties_info_table[i] = prop_info;
+				}
+			}
+		}
+	}
+
 	zend_hash_persist(&ce->constants_table);
 	ZEND_HASH_MAP_FOREACH_BUCKET(&ce->constants_table, p) {
 		if (p->key) {
@@ -628,6 +672,7 @@ zend_class_entry *zend_persist_class_entry(zend_class_entry *orig_ce)
 		}
 		zend_persist_class_constant(&p->val, ce);
 	} ZEND_HASH_FOREACH_END();
+	HT_FLAGS(&ce->constants_table) &= (HASH_FLAG_UNINITIALIZED | HASH_FLAG_STATIC_KEYS);
 
 	if (ce->num_interfaces && ce->interfaces) {
 		/* Interfaces are pointers to CE. We will fix them later in zend_update_parent_ce */
@@ -705,11 +750,143 @@ zend_class_entry *zend_persist_class_entry(zend_class_entry *orig_ce)
 
 void zend_update_parent_ce(zend_class_entry *ce)
 {
-	if (ce->parent) {
-		ce->parent = zend_shared_alloc_get_xlat_entry(ce->parent);
+	if (ce->ce_flags & ZEND_ACC_LINKED) {
+		if (ce->parent) {
+			int i, end;
+			zend_class_entry *parent = ce->parent;
+
+			if (parent->type == ZEND_USER_CLASS) {
+				zend_class_entry *p = zend_shared_alloc_get_xlat_entry(parent);
+
+				if (p) {
+					ce->parent = parent = p;
+				}
+			}
+
+			/* Create indirections to static properties from parent classes */
+			i = parent->default_static_members_count - 1;
+			while (parent && parent->default_static_members_table) {
+				end = parent->parent ? parent->parent->default_static_members_count : 0;
+				for (; i >= end; i--) {
+					zval *p = &ce->default_static_members_table[i];
+					ZVAL_INDIRECT(p, &parent->default_static_members_table[i]);
+				}
+
+				parent = parent->parent;
+			}
+		}
+
+		if (ce->num_interfaces) {
+			uint32_t i = 0;
+
+			ce->interfaces = zend_shared_memdup_put(ce->interfaces, sizeof(zend_class_entry*) * ce->num_interfaces);
+			for (i = 0; i < ce->num_interfaces; i++) {
+				if (ce->interfaces[i]->type == ZEND_USER_CLASS) {
+					zend_class_entry *tmp = zend_shared_alloc_get_xlat_entry(ce->interfaces[i]);
+					if (tmp != NULL) {
+						ce->interfaces[i] = tmp;
+					}
+				}
+			}
+		}
+
+		if (ce->iterator_funcs_ptr) {
+			memset(ce->iterator_funcs_ptr, 0, sizeof(zend_class_iterator_funcs));
+			if (zend_class_implements_interface(ce, zend_ce_aggregate)) {
+				ce->iterator_funcs_ptr->zf_new_iterator = zend_hash_str_find_ptr(&ce->function_table, "getiterator", sizeof("getiterator") - 1);
+			}
+			if (zend_class_implements_interface(ce, zend_ce_iterator)) {
+				ce->iterator_funcs_ptr->zf_rewind = zend_hash_str_find_ptr(&ce->function_table, "rewind", sizeof("rewind") - 1);
+				ce->iterator_funcs_ptr->zf_valid = zend_hash_str_find_ptr(&ce->function_table, "valid", sizeof("valid") - 1);
+				ce->iterator_funcs_ptr->zf_key = zend_hash_str_find_ptr(&ce->function_table, "key", sizeof("key") - 1);
+				ce->iterator_funcs_ptr->zf_current = zend_hash_str_find_ptr(&ce->function_table, "current", sizeof("current") - 1);
+				ce->iterator_funcs_ptr->zf_next = zend_hash_str_find_ptr(&ce->function_table, "next", sizeof("next") - 1);
+			}
+		}
+
+		if (ce->arrayaccess_funcs_ptr) {
+			ZEND_ASSERT(zend_class_implements_interface(ce, zend_ce_arrayaccess));
+			ce->arrayaccess_funcs_ptr->zf_offsetget = zend_hash_str_find_ptr(&ce->function_table, "offsetget", sizeof("offsetget") - 1);
+			ce->arrayaccess_funcs_ptr->zf_offsetexists = zend_hash_str_find_ptr(&ce->function_table, "offsetexists", sizeof("offsetexists") - 1);
+			ce->arrayaccess_funcs_ptr->zf_offsetset = zend_hash_str_find_ptr(&ce->function_table, "offsetset", sizeof("offsetset") - 1);
+			ce->arrayaccess_funcs_ptr->zf_offsetunset = zend_hash_str_find_ptr(&ce->function_table, "offsetunset", sizeof("offsetunset") - 1);
+		}
 	}
-	for (uint32_t i = 0; i < ce->num_interfaces; i++) {
-		ce->interfaces[i] = zend_shared_alloc_get_xlat_entry(ce->interfaces[i]);
+
+	/* Update methods */
+	if (ce->constructor) {
+		zend_function *tmp = zend_shared_alloc_get_xlat_entry(ce->constructor);
+		if (tmp != NULL) {
+			ce->constructor = tmp;
+		}
+	}
+	if (ce->destructor) {
+		zend_function *tmp = zend_shared_alloc_get_xlat_entry(ce->destructor);
+		if (tmp != NULL) {
+			ce->destructor = tmp;
+		}
+	}
+	if (ce->clone) {
+		zend_function *tmp = zend_shared_alloc_get_xlat_entry(ce->clone);
+		if (tmp != NULL) {
+			ce->clone = tmp;
+		}
+	}
+	if (ce->__get) {
+		zend_function *tmp = zend_shared_alloc_get_xlat_entry(ce->__get);
+		if (tmp != NULL) {
+			ce->__get = tmp;
+		}
+	}
+	if (ce->__set) {
+		zend_function *tmp = zend_shared_alloc_get_xlat_entry(ce->__set);
+		if (tmp != NULL) {
+			ce->__set = tmp;
+		}
+	}
+	if (ce->__call) {
+		zend_function *tmp = zend_shared_alloc_get_xlat_entry(ce->__call);
+		if (tmp != NULL) {
+			ce->__call = tmp;
+		}
+	}
+#if PHP_VERSION_ID < 80200
+	if (ce->__callstatic) {
+		zend_function *tmp = zend_shared_alloc_get_xlat_entry(ce->__callstatic);
+		if (tmp != NULL) {
+			ce->__callstatic = tmp;
+		}
+	}
+#endif
+	if (ce->__isset) {
+		zend_function *tmp = zend_shared_alloc_get_xlat_entry(ce->__isset);
+		if (tmp != NULL) {
+			ce->__isset = tmp;
+		}
+	}
+	if (ce->__unset) {
+		zend_function *tmp = zend_shared_alloc_get_xlat_entry(ce->__unset);
+		if (tmp != NULL) {
+			ce->__unset = tmp;
+		}
+	}
+	if (ce->__tostring) {
+		zend_function *tmp = zend_shared_alloc_get_xlat_entry(ce->__tostring);
+		if (tmp != NULL) {
+			ce->__tostring = tmp;
+		}
+	}
+	if (ce->__serialize) {
+		zend_function *tmp = zend_shared_alloc_get_xlat_entry(ce->__serialize);
+		if (tmp != NULL) {
+			ce->__serialize = tmp;
+		}
+	}
+	if (ce->__unserialize) {
+		zend_function *tmp = zend_shared_alloc_get_xlat_entry(ce->__unserialize);
+		if (tmp != NULL) {
+			ce->__unserialize = tmp;
+		}
 	}
 }
 

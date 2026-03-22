@@ -61,6 +61,18 @@ typedef struct _opkit_script_node {
 static opkit_script_node *loaded_scripts = NULL;
 static void opkit_fix_op_array_filenames(zend_op_array *op_array, zend_string *phar_prefix);
 
+/* Class linking error info structure (based on preload_error from ZendAccelerator) */
+typedef struct _opkit_link_error {
+	const char *kind;
+	const char *name;
+} opkit_link_error;
+
+/* Forward declarations for class linking functions */
+static zend_result opkit_resolve_class_deps(opkit_link_error *error, const zend_class_entry *ce);
+static void opkit_link_classes(void);
+static bool opkit_try_resolve_class_constants(zend_class_entry *ce);
+static void opkit_resolve_all_class_constants(void);
+
 void opkit_clean_script_items(zend_persistent_script *script) {
 	if (!script) return;
 
@@ -1001,6 +1013,338 @@ static void opkit_fix_op_array_filenames(zend_op_array *op_array, zend_string *p
 	}
 }
 
+/* Helper function to create objects and initialize properties
+ * This wraps zend_objects_new and adds property initialization
+ */
+static zend_object *opkit_create_object_with_props(zend_class_entry *ce) {
+	zend_object *obj = zend_objects_new(ce);
+	/* Initialize object properties from class default properties table */
+	if (ce->default_properties_count) {
+		zval *src = ce->default_properties_table;
+		zval *dst = obj->properties_table;
+		zval *end = src + ce->default_properties_count;
+		do {
+			ZVAL_COPY_PROP(dst, src);
+			src++;
+			dst++;
+		} while (src != end);
+	}
+	return obj;
+}
+
+/* Resolve class dependencies - check if parent, interfaces and traits exist
+ * Based on preload_resolve_deps() from ZendAccelerator.c
+ */
+static zend_result opkit_resolve_class_deps(opkit_link_error *error, const zend_class_entry *ce)
+{
+	memset(error, 0, sizeof(opkit_link_error));
+
+	/* Skip if already linked */
+	if (ce->ce_flags & ZEND_ACC_LINKED) {
+		return SUCCESS;
+	}
+
+	/* Check parent class */
+	if (ce->parent_name) {
+		zend_string *key = zend_string_tolower(ce->parent_name);
+		zend_class_entry *parent = zend_hash_find_ptr(EG(class_table), key);
+		zend_string_release(key);
+		if (!parent) {
+			error->kind = "Unknown parent";
+			error->name = ZSTR_VAL(ce->parent_name);
+			return FAILURE;
+		}
+	}
+
+	/* Check interfaces */
+	if (ce->num_interfaces) {
+		for (uint32_t i = 0; i < ce->num_interfaces; i++) {
+			zend_class_entry *interface =
+				zend_hash_find_ptr(EG(class_table), ce->interface_names[i].lc_name);
+			if (!interface) {
+				error->kind = "Unknown interface";
+				error->name = ZSTR_VAL(ce->interface_names[i].name);
+				return FAILURE;
+			}
+		}
+	}
+
+	/* Check traits */
+	if (ce->num_traits) {
+		for (uint32_t i = 0; i < ce->num_traits; i++) {
+			zend_class_entry *trait =
+				zend_hash_find_ptr(EG(class_table), ce->trait_names[i].lc_name);
+			if (!trait) {
+				error->kind = "Unknown trait";
+				error->name = ZSTR_VAL(ce->trait_names[i].name);
+				return FAILURE;
+			}
+		}
+	}
+
+	return SUCCESS;
+}
+
+/* Try to resolve class constants
+ * Based on preload_try_resolve_constants() from ZendAccelerator.c
+ */
+static bool opkit_try_resolve_class_constants(zend_class_entry *ce)
+{
+	bool ok, changed, was_changed = false;
+	zend_class_constant *c;
+	zval *val;
+
+	/* Skip traits - don't update trait constants in the same way */
+	if (ce->ce_flags & ZEND_ACC_TRAIT) {
+		return true;
+	}
+
+	/* Prevent error reporting during constant resolution */
+	EG(exception) = (void*)(uintptr_t)-1;
+
+	do {
+		ok = true;
+		changed = false;
+
+		/* Resolve class constants */
+		ZEND_HASH_MAP_FOREACH_PTR(&ce->constants_table, c) {
+			val = &c->value;
+			if (Z_TYPE_P(val) == IS_CONSTANT_AST) {
+				if (EXPECTED(zval_update_constant_ex(val, c->ce) == SUCCESS)) {
+					was_changed = changed = true;
+				} else {
+					ok = false;
+				}
+			}
+		} ZEND_HASH_FOREACH_END();
+
+		/* Resolve default properties */
+		if (ce->default_properties_count) {
+			bool resolved = true;
+			for (uint32_t i = 0; i < ce->default_properties_count; i++) {
+				val = &ce->default_properties_table[i];
+				if (Z_TYPE_P(val) == IS_CONSTANT_AST) {
+					zend_property_info *prop = ce->properties_info_table[i];
+					if (UNEXPECTED(zval_update_constant_ex(val, prop->ce) != SUCCESS)) {
+						resolved = ok = false;
+					}
+				}
+			}
+			if (resolved) {
+				ce->ce_flags &= ~ZEND_ACC_HAS_AST_PROPERTIES;
+			}
+		}
+
+		/* Resolve static members */
+		if (ce->default_static_members_count) {
+			uint32_t count = ce->parent
+				? ce->default_static_members_count - ce->parent->default_static_members_count
+				: ce->default_static_members_count;
+			bool resolved = true;
+
+			val = ce->default_static_members_table + ce->default_static_members_count - 1;
+			while (count) {
+				if (Z_TYPE_P(val) == IS_CONSTANT_AST) {
+					if (UNEXPECTED(zval_update_constant_ex(val, ce) != SUCCESS)) {
+						resolved = ok = false;
+					}
+				}
+				val--;
+				count--;
+			}
+			if (resolved) {
+				ce->ce_flags &= ~ZEND_ACC_HAS_AST_STATICS;
+			}
+		}
+	} while (changed && !ok);
+
+	EG(exception) = NULL;
+	CG(in_compilation) = false;
+
+	if (ok) {
+		ce->ce_flags |= ZEND_ACC_CONSTANTS_UPDATED;
+	}
+
+	return ok || was_changed;
+}
+
+/* Resolve all class constants after class linking
+ * Based on the constants resolution loop in preload_link()
+ */
+static void opkit_resolve_all_class_constants(void)
+{
+	bool changed;
+	zend_class_entry *ce;
+	zval *zv;
+
+	do {
+		changed = false;
+
+		ZEND_HASH_MAP_REVERSE_FOREACH_VAL(EG(class_table), zv) {
+			ce = Z_PTR_P(zv);
+			if (ce->type == ZEND_INTERNAL_CLASS) {
+				break;
+			}
+			if ((ce->ce_flags & ZEND_ACC_LINKED) && !(ce->ce_flags & ZEND_ACC_CONSTANTS_UPDATED)) {
+				if (!(ce->ce_flags & ZEND_ACC_TRAIT)) {
+					CG(in_compilation) = true; /* prevent autoloading */
+					if (opkit_try_resolve_class_constants(ce)) {
+						changed = true;
+					}
+					CG(in_compilation) = false;
+				}
+			}
+		} ZEND_HASH_FOREACH_END();
+	} while (changed);
+}
+
+/* Main class linking function
+ * Based on preload_link() from ZendAccelerator.c
+ *
+ * This implementation:
+ * 1. Uses multi-pass loop to handle dependency chains
+ * 2. Uses zend_do_link_class() for proper class linking
+ * 3. Handles errors and rollbacks properly
+ */
+static void opkit_link_classes(void)
+{
+	zend_string *key;
+	zval *zv;
+	zend_class_entry *ce;
+	bool changed;
+	HashTable errors;
+
+	zend_hash_init(&errors, 0, NULL, NULL, 0);
+
+	/* First pass: Resolve class dependencies and link classes
+	 * We loop multiple times to handle dependency chains (A extends B extends C)
+	 */
+	do {
+		changed = false;
+
+		ZEND_HASH_MAP_FOREACH_STR_KEY_VAL(EG(class_table), key, zv) {
+			ce = Z_PTR_P(zv);
+
+			/* Skip internal classes */
+			if (ce->type == ZEND_INTERNAL_CLASS) {
+				continue;
+			}
+
+			/* Skip if already linked or not a top-level/anonymous class */
+			if (!(ce->ce_flags & (ZEND_ACC_TOP_LEVEL|ZEND_ACC_ANON_CLASS))
+					|| (ce->ce_flags & ZEND_ACC_LINKED)) {
+				continue;
+			}
+
+			/* Check if class name already exists (for non-anonymous classes) */
+			zend_string *lcname = zend_string_tolower(ce->name);
+			if (!(ce->ce_flags & ZEND_ACC_ANON_CLASS)) {
+				/* Skip if already declared by another script */
+				if (zend_hash_exists(EG(class_table), lcname)) {
+					zend_class_entry *existing = zend_hash_find_ptr(EG(class_table), lcname);
+					if (existing != ce) {
+						zend_string_release(lcname);
+						continue;
+					}
+				}
+			}
+
+			/* Resolve dependencies */
+			opkit_link_error error_info;
+			if (opkit_resolve_class_deps(&error_info, ce) == FAILURE) {
+				zend_string_release(lcname);
+				continue; /* Dependencies not ready, try again next iteration */
+			}
+
+			/* Update hash key to lowercase name for proper lookup */
+			if (!zend_string_equals(key, lcname)) {
+				zv = zend_hash_set_bucket_key(EG(class_table), (Bucket*)zv, lcname);
+				if (!zv) {
+					/* Key collision, skip this class */
+					zend_string_release(lcname);
+					continue;
+				}
+			}
+
+			/* Prepare for class linking
+			 * We temporarily set FILE_CACHED flag to force lazy loading behavior
+			 * and CACHED flag to prevent freeing of interface names.
+			 */
+			void *checkpoint = zend_arena_checkpoint(CG(arena));
+			zend_class_entry *orig_ce = ce;
+			ce->ce_flags |= ZEND_ACC_FILE_CACHED|ZEND_ACC_CACHED;
+			if (ce->parent_name) {
+				zend_string_addref(ce->parent_name);
+			}
+
+			/* Set compilation context for inheritance errors */
+			bool orig_in_compilation = CG(in_compilation);
+			zend_string *orig_compiled_filename = CG(compiled_filename);
+			CG(in_compilation) = true;
+			CG(compiled_filename) = ce->info.user.filename;
+			CG(zend_lineno) = ce->info.user.line_start;
+
+			/* Attempt to link the class using zend_do_link_class */
+			zend_try {
+				ce = zend_do_link_class(ce, NULL, lcname);
+				if (ce) {
+					/* Success - update the pointer and clean up flags */
+					Z_CE_P(zv) = ce;
+					ce->ce_flags &= ~(ZEND_ACC_FILE_CACHED|ZEND_ACC_CACHED);
+					ce->ce_flags &= ~ZEND_ACC_IMMUTABLE;
+#if PHP_VERSION_ID >= 80300
+					ce->default_object_handlers = &std_object_handlers;
+#endif
+					changed = true;
+				} else {
+					/* Linking failed but no exception - restore flags */
+					orig_ce->ce_flags &= ~(ZEND_ACC_FILE_CACHED|ZEND_ACC_CACHED);
+					zend_arena_release(&CG(arena), checkpoint);
+				}
+			} zend_catch {
+				/* Linking failed with exception - restore original class */
+				orig_ce->ce_flags &= ~(ZEND_ACC_FILE_CACHED|ZEND_ACC_CACHED);
+				zv = zend_hash_set_bucket_key(EG(class_table), (Bucket*)zv, key);
+				Z_CE_P(zv) = orig_ce;
+				zend_arena_release(&CG(arena), checkpoint);
+
+				/* Clear variance obligations */
+				if (CG(delayed_variance_obligations)) {
+					zend_hash_index_del(
+						CG(delayed_variance_obligations), (uintptr_t) Z_CE_P(zv));
+				}
+			} zend_end_try();
+
+			/* Restore compilation context */
+			CG(in_compilation) = orig_in_compilation;
+			CG(compiled_filename) = orig_compiled_filename;
+			CG(zend_lineno) = 0;
+
+			zend_string_release(lcname);
+		} ZEND_HASH_FOREACH_END();
+	} while (changed);
+
+	/* Warn for classes that could not be linked */
+	ZEND_HASH_MAP_FOREACH_STR_KEY_VAL(EG(class_table), key, zv) {
+		ce = Z_PTR_P(zv);
+		if (ce->type == ZEND_INTERNAL_CLASS) {
+			continue;
+		}
+		if ((ce->ce_flags & (ZEND_ACC_TOP_LEVEL|ZEND_ACC_ANON_CLASS))
+				&& !(ce->ce_flags & ZEND_ACC_LINKED)) {
+			opkit_link_error error;
+			if (opkit_resolve_class_deps(&error, ce) == SUCCESS) {
+				/* Dependencies exist but linking failed - warn */
+				php_error_docref(NULL, E_WARNING,
+					"Can't load unlinked class %s: %s %s",
+					ZSTR_VAL(ce->name), error.kind, error.name);
+			}
+		}
+	} ZEND_HASH_FOREACH_END();
+
+	zend_hash_destroy(&errors);
+}
+
 // Start and execute the entry function
 ZEND_FUNCTION(opkit_boot) {
 	zend_fcall_info fci = empty_fcall_info;
@@ -1037,7 +1381,7 @@ ZEND_FUNCTION(opkit_boot) {
 		}
 	}
 
-	// Phase 1: Register all classes and functions
+	// Phase 1: Register all classes, functions and constants
 	dtor_func_t orig_class_dtor = EG(class_table)->pDestructor;
 	EG(class_table)->pDestructor = NULL;
 	dtor_func_t orig_func_dtor = EG(function_table)->pDestructor;
@@ -1056,31 +1400,28 @@ ZEND_FUNCTION(opkit_boot) {
 			opkit_fix_op_array_filenames(&script->script.main_op_array, phar_prefix);
 		}
 
-		// 1. Register classes and fix methods
+		/* 1. Register classes to class_table (pre-linking registration)
+		 * We register all classes first without linking them.
+		 * The linking will be done in a separate pass after all classes are registered.
+		 */
 		zend_string *key;
 		ZEND_HASH_FOREACH_STR_KEY_PTR(&script->script.class_table, key, ce) {
 			if (phar_prefix) {
 				ce->info.user.filename = script->script.main_op_array.filename;
 			}
-			// 1.1 Register original keys (including RTD Keys), ensure interned strings are used and overwrite old items
+				// Register with original key (including RTD Keys)
 			if (key) {
 				zend_hash_update_ptr(EG(class_table), key, ce);
 			} else {
 				// For classes without explicit keys, use ce->name
 				zend_hash_update_ptr(EG(class_table), ce->name, ce);
 			}
-			// 1.2 Register canonical lowercase names
-			zend_string *lcname = zend_string_tolower(ce->name);
-			zend_hash_update_ptr(EG(class_table), lcname, ce);
-			zend_string_release(lcname);
 
-			ce->ce_flags |= ZEND_ACC_LINKED;
-			// ce->ce_flags &= ~ZEND_ACC_IMMUTABLE;
-			ce->create_object = zend_objects_new;
-#if PHP_VERSION_ID >= 80300
-			ce->default_object_handlers = &std_object_handlers;
-#endif
+			// Clear ZEND_ACC_LINKED - will be set by opkit_link_classes()
+			// ce->ce_flags &= ~ZEND_ACC_LINKED;
+			ce->ce_flags &= ~ZEND_ACC_IMMUTABLE;
 
+			// Fix method filenames and immutability flags
 			zend_function *m;
 			ZEND_HASH_FOREACH_PTR(&ce->function_table, m) {
 				if (m->type == ZEND_USER_FUNCTION) {
@@ -1090,26 +1431,27 @@ ZEND_FUNCTION(opkit_boot) {
 					m->op_array.fn_flags &= ~ZEND_ACC_IMMUTABLE;
 				}
 			} ZEND_HASH_FOREACH_END();
+
 #if PHP_VERSION_ID >= 80400
-		// Fix Property Hooks immutability flags
-		zend_property_info *prop_info;
-		ZEND_HASH_FOREACH_PTR(&ce->properties_info, prop_info) {
-			if (prop_info->hooks) {
-				for (uint32_t i = 0; i < ZEND_PROPERTY_HOOK_COUNT; i++) {
-					zend_function *hook = prop_info->hooks[i];
-					if (hook && hook->type == ZEND_USER_FUNCTION) {
-						if (phar_prefix) {
-							opkit_fix_op_array_filenames(&hook->op_array, phar_prefix);
+			// Fix Property Hooks immutability flags
+			zend_property_info *prop_info;
+			ZEND_HASH_FOREACH_PTR(&ce->properties_info, prop_info) {
+				if (prop_info->hooks) {
+					for (uint32_t i = 0; i < ZEND_PROPERTY_HOOK_COUNT; i++) {
+						zend_function *hook = prop_info->hooks[i];
+						if (hook && hook->type == ZEND_USER_FUNCTION) {
+							if (phar_prefix) {
+								opkit_fix_op_array_filenames(&hook->op_array, phar_prefix);
+							}
+							hook->op_array.fn_flags &= ~ZEND_ACC_IMMUTABLE;
 						}
-						hook->op_array.fn_flags &= ~ZEND_ACC_IMMUTABLE;
 					}
 				}
-			}
-		} ZEND_HASH_FOREACH_END();
+			} ZEND_HASH_FOREACH_END();
 #endif
 		} ZEND_HASH_FOREACH_END();
 
-		// 2. Register functions and fix
+		// 2. Register functions
 		ZEND_HASH_FOREACH_PTR(&script->script.function_table, f) {
 			if (f->type != ZEND_USER_FUNCTION) continue;
 
@@ -1132,10 +1474,24 @@ ZEND_FUNCTION(opkit_boot) {
 			}
 		} ZEND_HASH_FOREACH_END();
 
- 	node = node->next;
+ 		node = node->next;
 	}
 
-	// Phase 2: Execute all scripts
+	/* Phase 1.5: Link classes
+	 * After all classes are registered, we perform proper class linking.
+	 * This resolves inheritance dependencies, interface implementations,
+	 * trait usage, and validates class hierarchies.
+	 *
+	 * This is based on preload_link() from Zend OPcache.
+	 */
+	opkit_link_classes();
+
+	/* Phase 1.6: Resolve class constants
+	 * After class linking, resolve constants that may depend on other classes.
+	 */
+	opkit_resolve_all_class_constants();
+
+	// Phase 2: Execute all scripts (after class linking is complete)
 	node = loaded_scripts;
 	while (node) {
 		zend_persistent_script *script = node->script;
