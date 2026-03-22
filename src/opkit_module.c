@@ -170,29 +170,18 @@ static void opkit_reset_script(void) {
 			opkit_clean_script_items(node->script);
 
 			/* Clean up heap allocated runtime cache to prevent memory leaks
-			 * Only needed for PHP 8.4+ which uses heap allocation for runtime cache
-			 *
-			 * SAFETY: Only clean runtime cache when no classes are defined.
-			 * When classes are present (especially with constants), the runtime
-			 * cache may have a different memory layout that causes heap corruption
-			 * if manually freed. This is a known issue in PHP 8.4+ debug builds.
+			 * This is needed for all PHP versions that use heap allocation for runtime cache
 			 */
-#if PHP_VERSION_ID >= 80400
 			if (node->executed) {
-				/* Check if script has classes - if so, skip runtime cache cleanup */
-				uint32_t num_classes = node->script->script.class_table.nNumOfElements;
-				if (num_classes == 0) {
-					zend_op_array *main_op_array = &node->script->script.main_op_array;
-					if (main_op_array->fn_flags & ZEND_ACC_HEAP_RT_CACHE) {
-						void *cache = ZEND_MAP_PTR(main_op_array->run_time_cache);
-						if (cache) {
-							efree(cache);
-							ZEND_MAP_PTR(main_op_array->run_time_cache) = NULL;
-						}
+				zend_op_array *main_op_array = &node->script->script.main_op_array;
+				if (main_op_array->fn_flags & ZEND_ACC_HEAP_RT_CACHE) {
+					void *cache = ZEND_MAP_PTR(main_op_array->run_time_cache);
+					if (cache) {
+						efree(cache);
+						ZEND_MAP_PTR(main_op_array->run_time_cache) = NULL;
 					}
 				}
 			}
-#endif
 		}
 		if (node->mem_to_free) {
 			efree(node->mem_to_free);
