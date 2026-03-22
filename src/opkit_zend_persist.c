@@ -594,8 +594,13 @@ zend_class_entry *zend_persist_class_entry(zend_class_entry *orig_ce)
 	ce = _opkit_shared_memdup_put_md(ce, sizeof(zend_class_entry));
 
 	zend_accel_store_interned_string(ce->name);
+
 	if (ce->parent_name) {
 		zend_accel_store_interned_string(ce->parent_name);
+	}
+
+	if (ce->info.user.filename) {
+		zend_accel_store_interned_string(ce->info.user.filename);
 	}
 
 	zend_hash_persist(&ce->function_table);
