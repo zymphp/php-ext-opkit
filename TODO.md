@@ -18,7 +18,10 @@
 
 ## 测试与质量
 - [x] **静态分析支持**: 增强 `opkit_get_info` 导出详细元数据，实现 `phpc --stubs` 生成 PHP 定义存根，新增 `phpc analyze` 指令用于冲突检测。
-- [ ] **🔴 完善常量与属性测试**: 增加对普通常量（`define()`/`const`）、类属性（含类型、默认值、访问修饰符）、类常量（含可见性修饰符）的全面测试用例。
+- [x] **🔴 完善常量与属性测试**: 增加对普通常量（`define()`/`const`）、类属性（含类型、默认值、访问修饰符）、类常量（含可见性修饰符）的全面测试用例。
+  - 新增 `tests/20_constants_comprehensive.phpt` - 测试 namespace const、define()、类常量（含可见性修饰符）、trait 常量、interface 常量
+  - 新增 `tests/21_properties_comprehensive.phpt` - 测试类型属性、可见性、静态属性、readonly、联合类型、默认值
+  - 新增 `tests/22_constants_properties_integration.phpt` - 测试继承、抽象类、final 类、常量作为属性默认值
 - [ ] **🟢 全面基准测试套件**: 开发标准基准测试，用于评估和展示不同类型应用程序的性能提升。
 
 ## 性能与稳定性
@@ -35,3 +38,33 @@
 
 ## 高级 Phar 支持
 - [x] **归档优化**: 支持 Phar 压缩（GZip、BZip2）和数字签名。
+
+## 测试结果汇总 (2026-03-23)
+
+| PHP 版本 | 通过 | 跳过 | 失败 | 通过率 |
+|---------|------|------|------|--------|
+| PHP 8.2.30 | 19 | 2 | 2 | 90.5% |
+| PHP 8.3.30 | 19 | 2 | 2 | 90.5% |
+| PHP 8.4.19 | 20 | 1 | 2 | 90.9% |
+
+### 新增测试文件
+- `tests/20_constants_comprehensive.phpt` - 全面常量测试
+- `tests/21_properties_comprehensive.phpt` - 全面属性测试 ✅
+- `tests/22_constants_properties_integration.phpt` - 集成测试
+
+### 已知问题
+
+**🔴 Trait 常量和 Interface 常量导致段错误**
+- 测试文件: `20_constants_comprehensive.phpt`
+- 问题: 包含 trait constants 和 interface 实现时运行时崩溃 (Termsig=11)
+- 影响: PHP 8.2/8.3/8.4 全部受影响
+- 临时规避: 避免在编译的 PHP 代码中使用 trait 常量
+
+**🔴 复杂类继承与常量集成测试失败**
+- 测试文件: `22_constants_properties_integration.phpt`
+- 问题: 运行时崩溃 (Termsig=11)，需进一步排查
+- 可能原因: 抽象类继承、静态属性或常量数组索引
+
+### 跳过的测试
+- `tests/05_triple_des.phpt` - 需要 openssl 扩展
+- `tests/18_property_hooks.phpt` - PHP 8.4+ 专属（在 8.2/8.3 跳过）
