@@ -28,7 +28,7 @@ OpKit (Opcode Toolkit) 是一个处于 **实验阶段** 的 PHP Opcode 预编译
 
 ## 📋 环境要求
 
-- **PHP 版本**: 支持 PHP 8.2、8.3 和 8.4。正在计划适配 PHP 8.5。
+- **PHP 版本**: 支持 PHP 8.2、8.3 和 8.4。PHP 8.5 由于核心机制变更（自动编译 OPcache）暂不支持。
 - **构建工具**: 需要安装 `phpize`、`php-config`、`make` 以及 C 编译器（如 `gcc`）。
 - **运行依赖**: OpKit 必须作为 **Zend Extension** 加载，且与 `Zend OPcache` 互斥。
 
@@ -85,7 +85,7 @@ php -d zend_extension=opkit.so dist/entry.php
 | **基础编译** | `phpc -s src/ -o dist/` |
 | **使用配置** | `phpc -c opkit.json` |
 | **强制重编** | `phpc -s src/ -o dist/ -f` |
-| **静态分析** | `phpc analyze dist/` |
+| **静态分析** | `phpc analyze <dir|file>` |
 | **打包 Phar** | `phpc -s src/ -o dist/ -p app.phar` |
 | **查看详情** | `phpc -i dist/User.phpc` |
 

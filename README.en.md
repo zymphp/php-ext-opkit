@@ -28,7 +28,7 @@ OpKit (Opcode Toolkit) is an **experimental** Opcode pre-compilation and persist
 
 ## 📋 Requirements
 
-- **PHP Version**: Supports PHP 8.2, 8.3, and 8.4. Support for PHP 8.5 is planned.
+- **PHP Version**: Supports PHP 8.2, 8.3, and 8.4. PHP 8.5 is not supported due to core mechanism changes (automatic OPcache compilation).
 - **Build Tools**: Requires `phpize`, `php-config`, `make`, and a C compiler (e.g., `gcc`).
 - **Runtime Dependency**: OpKit must be loaded as a **Zend Extension** and is incompatible with `Zend OPcache`.
 
@@ -85,7 +85,7 @@ php -d zend_extension=opkit.so dist/entry.php
 | **Basic Compilation** | `phpc -s src/ -o dist/` |
 | **Using Config** | `phpc -c opkit.json` |
 | **Force Recompile** | `phpc -s src/ -o dist/ -f` |
-| **Static Analysis**| `phpc analyze dist/` |
+| **Static Analysis** | `phpc analyze <dir|file>` |
 | **Package Phar** | `phpc -s src/ -o dist/ -p app.phar` |
 | **View Details** | `phpc -i dist/User.phpc` |
 
