@@ -211,6 +211,6 @@ OpKit 提供以下技术文档，帮助深入了解系统实现：
 ## 📜 Credits
 
 - **Author**: Eno-CN <Eno_CN@qq.com>
-- **Assistant**: Developed with help from AI Assistant - Junie.
+- **Assistant**: Developed with help from AI Assistant – Junie.
 - **Reference**: OpKit is heavily based on [Zend OPcache](https://github.com/php/php-src/tree/master/ext/opcache).
 - **Acknowledgment**: This product includes PHP software, freely available from <http://www.php.net/software/>.
