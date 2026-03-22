@@ -469,8 +469,8 @@ static void zend_file_cache_serialize_prop_info(zval *zv, zend_persistent_script
 			SERIALIZE_PTR(prop->prototype);
 			/* Serialize property hooks */
 			if (prop->hooks) {
-				zend_function **hooks = prop->hooks;
 				SERIALIZE_PTR(prop->hooks);
+				zend_function **hooks = prop->hooks;
 				UNSERIALIZE_PTR(hooks);
 				for (uint32_t i = 0; i < ZEND_PROPERTY_HOOK_COUNT; i++) {
 					if (hooks[i]) {
@@ -1079,6 +1079,7 @@ static void zend_file_cache_unserialize_prop_info(zval *zv, zend_persistent_scri
 						if (prop->hooks[i]) {
 							UNSERIALIZE_PTR(prop->hooks[i]);
 							zend_file_cache_unserialize_op_array(&prop->hooks[i]->op_array, script, buf);
+							prop->hooks[i]->common.prop_info = prop;
 						}
 					}
 				}

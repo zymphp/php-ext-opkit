@@ -9,6 +9,8 @@
 6. [运行时加载流程](#6-运行时加载流程)
 7. [关键数据结构转换](#7-关键数据结构转换)
 8. [PHP 8.4 特殊处理](#8-php-84-特殊处理)
+9. [调试和诊断](#9-调试和诊断)
+10. [总结](#10-总结)
 
 ---
 
@@ -558,7 +560,7 @@ static void zend_file_cache_serialize_op_array(zend_op_array *op_array,
 │  ┌─────────────────────────────────────────────────────────┐    │
 │  │                    文件头 (metainfo)                     │    │
 │  │  ┌─────────────────────────────────────────────────┐    │    │
-│  │  │ magic[8]          │ "OPKIT\n\0\0"               │    │    │
+│  │  │ magic[8]          │ "PHPC\0\0\0\0"              │    │    │
 │  │  │ system_id[32]     │ PHP 系统 ID                  │    │    │
 │  │  │ mem_size          │ 脚本数据大小                 │    │    │
 │  │  │ str_size          │ 字符串池大小                 │    │    │
@@ -644,10 +646,10 @@ int opkit_compile_script_store(zend_string *output_path, zend_persistent_script 
 
     // 序列化脚本
     memset(&info, 0, sizeof(info));
-    memcpy(info.magic, "OPKIT\n\0\0", 8);
+    memcpy(info.magic, "PHPC", 5);  // Magic: 5字节 "PHPC"（包括结尾的\0）
     memcpy(info.system_id, opkit_system_id, 32);
     info.mem_size = script->size;
-    info.str_size = info.str_size;  // 由序列化过程填充
+    info.str_size = ZSTR_LEN(current_string_pool);  // 字符串池实际使用大小
     info.script_offset = 0;
     info.timestamp = time(NULL);
     info.metadata_size = opkit_metadata_size;
@@ -702,7 +704,7 @@ int opkit_compile_script_store(zend_string *output_path, zend_persistent_script 
 │  ┌──────────────────┐                                           │
 │  │ 1. 读取文件       │  opkit_compile_script_load()             │
 │  │    - 读取 metainfo│  - open() + read()                        │
-│  │    - 验证魔数     │  - 验证 "OPKIT" magic                     │
+│  │    - 验证魔数     │  - 验证 "PHPC" magic                      │
 │  │    - 验证系统 ID  │  - 对比 opkit_system_id                   │
 │  │    - 验证校验和   │  - Adler-32 校验                          │
 │  └────────┬─────────┘                                           │
@@ -769,7 +771,7 @@ zend_persistent_script *opkit_compile_script_load(zend_string *filename) {
     read_bytes = read(fd, &info, sizeof(info));
 
     // 验证魔数
-    if (memcmp(info.magic, "OPKIT\n", 6) != 0) {
+    if (memcmp(info.magic, "PHPC", 5) != 0) {
         close(fd);
         return NULL;
     }
@@ -1090,38 +1092,41 @@ PHP 8.4 从多个结构中移除了 doc_comment：
 #endif
 ```
 
-### 8.3 运行时缓存处理（PHP 8.4+）
+### 8.3 运行时缓存处理
 
-PHP 8.4 使用堆分配的 runtime cache，需要在 RSHUTDOWN 时清理：
+对于使用堆分配 runtime cache 的 PHP 版本，需要在 RSHUTDOWN 时清理以防止内存泄漏：
 
 ```c
 static void opkit_reset_script(void) {
     opkit_script_node *node = loaded_scripts;
+    opkit_script_node *next;
 
     while (node) {
+        next = node->next;
         if (node->script) {
             opkit_clean_script_items(node->script);
 
-#if PHP_VERSION_ID >= 80400
-            // PHP 8.4+ 需要手动清理堆分配的 runtime cache
+            /* Clean up heap allocated runtime cache to prevent memory leaks
+             * This is needed for all PHP versions that use heap allocation for runtime cache
+             */
             if (node->executed) {
-                // 检查是否有类，有类时跳过（避免堆损坏）
-                uint32_t num_classes = node->script->script.class_table.nNumOfElements;
-                if (num_classes == 0) {
-                    zend_op_array *main_op_array = &node->script->script.main_op_array;
-                    if (main_op_array->fn_flags & ZEND_ACC_HEAP_RT_CACHE) {
-                        void *cache = ZEND_MAP_PTR(main_op_array->run_time_cache);
-                        if (cache) {
-                            efree(cache);
-                            ZEND_MAP_PTR(main_op_array->run_time_cache) = NULL;
-                        }
+                zend_op_array *main_op_array = &node->script->script.main_op_array;
+                if (main_op_array->fn_flags & ZEND_ACC_HEAP_RT_CACHE) {
+                    void *cache = ZEND_MAP_PTR(main_op_array->run_time_cache);
+                    if (cache) {
+                        efree(cache);
+                        ZEND_MAP_PTR(main_op_array->run_time_cache) = NULL;
                     }
                 }
             }
-#endif
         }
-        // ... 清理内存
+        if (node->mem_to_free) {
+            efree(node->mem_to_free);
+        }
+        efree(node);
+        node = next;
     }
+    loaded_scripts = NULL;
 }
 ```
 
@@ -1137,7 +1142,7 @@ $info = opkit_get_info('script.phpc');
 
 // 返回的信息结构：
 [
-    'magic' => 'OPKIT',
+    'magic' => 'PHPC',
     'system_id' => '...',
     'system_id_match' => true,
     'mem_size' => 12345,

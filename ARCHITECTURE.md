@@ -126,7 +126,7 @@ typedef struct _opkit_script_node {
     char *current_path;                      // 当前路径
     zend_persistent_script *script;          // 持久化脚本
     zend_op_array *main_op_array;            // 主操作码数组
-    bool executed;                           // 是否已执行 (PHP 8.4+)
+    bool executed;                           // 是否已执行
     struct _opkit_script_node *next;
     struct _opkit_script_node *prev;
 } opkit_script_node;
@@ -375,7 +375,7 @@ OpKit 使用逻辑内存分区来优化缓存效率：
 | `doc_comment` | 存在于 `zend_property_info` | 已移除 |
 | Property Hooks | 不支持 | 支持 (4种钩子) |
 | `prop_info` | 不存在于 `zend_op_array` | 存在 |
-| Runtime Cache | 自动管理 | 需要手动清理 |
+| Runtime Cache | 堆分配时需要手动清理 | 堆分配时需要手动清理 |
 
 ### 7.3 Property Hooks 支持
 
@@ -552,6 +552,7 @@ make
 | `08_phpc_config.phpt` | 配置文件 | opkit.json |
 | `09_phpc_incremental.phpt` | 增量编译 | mtime 检查 |
 | `18_property_hooks.phpt` | 属性钩子 | PHP 8.4+ |
+| `19_class_properties.phpt` | 类属性 | 类型属性支持 |
 
 ### 11.2 测试格式
 
@@ -669,6 +670,8 @@ opkit/
 
 1. **编辑 `src/opkit.stub.php`**：添加 PHP 函数签名
 2. **生成 arginfo**：`make` 自动生成 `src/opkit_arginfo.h`
+   - 使用 `build/gen_stub.php`（来自 PHP 源码 `php-src/php-X.X.X/build/gen_stub.php`）
+   - 命令：`php build/gen_stub.php src/opkit.stub.php`
 3. **实现函数**：在 `src/opkit_module.c` 中添加 C 实现
 4. **添加测试**：在 `tests/` 目录创建 `.phpt` 测试文件
 
@@ -676,13 +679,13 @@ opkit/
 
 ```bash
 # GDB 调试
-gdb --args php -d zend_extension=./modules/opkit.so test.php
+gdb --args php-src/php-8.2.30/sapi/cli/php -d zend_extension=./modules/opkit.so test.php
 
 # 检查内存泄漏
-php -d memory_limit=256M test.php
+php-src/php-8.2.30/sapi/cli/php -d memory_limit=256M test.php
 
 # 验证 OPcache 是否禁用
-php -m | grep -i opcache  # 应该无输出
+php-src/php-8.2.30/sapi/cli/php -m | grep -i opcache  # 应该无输出
 ```
 
 ---

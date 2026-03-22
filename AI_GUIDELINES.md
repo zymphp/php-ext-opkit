@@ -10,7 +10,7 @@ OpKit is a PHP extension designed to provide **offline Opcode persistence** and 
     - `src/opkit_module.c`: Extension entry, lifecycle (MINIT, MSHUTDOWN, RINIT, RSHUTDOWN).
     - `src/opkit_compile.c`: Compilation engine, logic for saving/loading scripts.
     - `src/opkit_zend_persist.c`: Memory calculation and data copying to persistent storage.
-    - `src/opkit.stub.php`: PHP API definitions for `gen_stub.php`.
+    - `src/opkit.stub.php`: PHP API definitions (processed by `build/gen_stub.php` to generate `src/opkit_arginfo.h`).
     - `bin/phpc`: The primary CLI tool for project-wide compilation and packaging.
 
 ---
@@ -50,7 +50,7 @@ OpKit is a PHP extension designed to provide **offline Opcode persistence** and 
 ## 4. Coding Standards & Conventions
 - **API Changes**:
     - Always modify `src/opkit.stub.php` first.
-    - Run `make build-modules` to regenerate `src/opkit_arginfo.h`.
+    - Run `make` to regenerate `src/opkit_arginfo.h` using `build/gen_stub.php` (from PHP source).
 - **Memory Management**:
     - Persistent memory is allocated via `ZCG(mem)` (shadow partition).
     - Use logic-partitioning macros for memory calculation: `ADD_SIZE_MD`, `ADD_SIZE_CD`, `ADD_SIZE_DT`, `ADD_SIZE_MS`.
