@@ -101,21 +101,13 @@ typedef struct _zend_persistent_script {
 
 ### 3.3 文件缓存元信息
 
-```c
-typedef struct _zend_file_cache_metainfo {
-    char         magic[8];                   // 文件魔数 "PHPC\0"
-    char         system_id[32];              // 系统 ID (PHP 版本 + 架构)
-    size_t       mem_size;                   // 内存大小
-    size_t       str_size;                   // 字符串大小
-    size_t       script_offset;              // 脚本偏移量
-    time_t       timestamp;                  // 时间戳
-    uint32_t     checksum;                   // Adler-32 校验和
-    size_t       metadata_size;              // 元数据区域大小
-    size_t       code_size;                  // 代码区域大小
-    size_t       data_size;                  // 数据区域大小
-    size_t       misc_size;                  // 杂项区域大小
-} zend_file_cache_metainfo;
-```
+`.phpc` 文件格式的完整定义详见 [PHPC_FILE_FORMAT.md](./PHPC_FILE_FORMAT.md)。
+
+关键字段：
+- `magic[8]`: 文件标识 "PHPC"
+- `system_id[32]`: PHP 系统标识，用于兼容性检查
+- `checksum`: Adler-32 校验和，验证文件完整性
+- 四分区统计: `metadata_size`, `code_size`, `data_size`, `misc_size`
 
 ### 3.4 脚本节点（运行时）
 
@@ -203,154 +195,53 @@ OpKit 使用逻辑内存分区来优化缓存效率：
 
 ---
 
-## 5. 编译流程详解
+## 5. 编译与加载流程
 
 ### 5.1 编译时流程
 
-```
-┌──────────────────────────────────────────────────────────────────┐
-│                      Compilation Flow                             │
-└──────────────────────────────────────────────────────────────────┘
+1. **PHP 编译**: `zend_compile_file()` 解析源码生成 AST，编译为 Opcodes
+2. **符号移动**: `opkit_compile_file()` 将函数、类、常量移动到脚本结构
+3. **内存计算**: `zend_accel_script_persist_calc()` 计算四分区内存需求
+4. **数据持久化**: `zend_accel_script_persist()` 复制到连续内存，序列化指针为偏移量
+5. **文件写入**: `opkit_compile_script_store()` 写入文件头 + 数据 + 字符串池
 
-  PHP Source File (*.php)
-           │
-           ▼
-  ┌─────────────────┐
-  │  PHP Compiler   │  zend_compile_file()
-  │                 │  - 解析 PHP 代码
-  │                 │  - 生成 AST
-  │                 │  - 编译为 Opcodes
-  └────────┬────────┘
-           │
-           ▼
-  ┌─────────────────┐
-  │  Move Symbols   │  opkit_compile_file()
-  │                 │  - 移动函数到 script.function_table
-  │                 │  - 移动类到 script.class_table
-  │                 │  - 移动常量到 constants_table
-  └────────┬────────┘
-           │
-           ▼
-  ┌─────────────────┐
-  │ Calculate Size  │  zend_accel_script_persist_calc()
-  │                 │  - 计算各部分内存需求
-  │                 │  - 初始化 xlat_table
-  └────────┬────────┘
-           │
-           ▼
-  ┌─────────────────┐
-  │   Persist Data  │  zend_accel_script_persist()
-  │                 │  - 复制到连续内存块
-  │                 │  - 序列化指针为偏移量
-  └────────┬────────┘
-           │
-           ▼
-  ┌─────────────────┐
-  │  Serialize      │  opkit_serialize_persistent_script()
-  │                 │  - 将指针转换为相对偏移
-  │                 │  - 准备存储格式
-  └────────┬────────┘
-           │
-           ▼
-  ┌─────────────────┐
-  │  Write to File  │  opkit_compile_script_store()
-  │                 │  - 写入 metainfo
-  │                 │  - 写入脚本数据
-  │                 │  - 可选加密
-  └────────┬────────┘
-           │
-           ▼
-    Binary File (*.phpc)
-```
+详细的序列化机制和数据格式定义，参见 [PHPC_FILE_FORMAT.md](./PHPC_FILE_FORMAT.md)。
 
 ### 5.2 运行时加载流程
 
-```
-┌──────────────────────────────────────────────────────────────────┐
-│                      Runtime Loading Flow                         │
-└──────────────────────────────────────────────────────────────────┘
-
-  Binary File (*.phpc)
-           │
-           ▼
-  ┌─────────────────┐
-  │   Load File     │  opkit_compile_script_load()
-  │                 │  - 读取 metainfo
-  │                 │  - 验证魔数和系统 ID
-  │                 │  - 验证校验和
-  └────────┬────────┘
-           │
-           ▼
-  ┌─────────────────┐
-  │  Deserialize    │  opkit_deserialize_persistent_script()
-  │                 │  - 将偏移量还原为指针
-  │                 │  - 重建数据结构
-  └────────┬────────┘
-           │
-           ▼
-  ┌─────────────────┐
-  │  Fix Pointers   │  递归修复所有内部指针
-  │                 │  - fix_script_pointers()
-  │                 │  - fix_op_array_pointers()
-  │                 │  - fix_class_entry_pointers()
-  └────────┬────────┘
-           │
-           ▼
-  ┌─────────────────┐
-  │  Register       │  opkit_boot() / opkit_load()
-  │                 │  - 注册函数到 CG(function_table)
-  │                 │  - 注册类到 CG(class_table)
-  │                 │  - 注册常量
-  │                 │  - 处理早期绑定
-  └────────┬────────┘
-           │
-           ▼
-  ┌─────────────────┐
-  │    Execute      │  zend_execute()
-  │                 │  - 执行主 op_array
-  └─────────────────┘
-```
+1. **文件加载**: `opkit_compile_script_load()` 读取并验证文件头（magic、system_id、checksum）
+2. **反序列化**: `zend_file_cache_unserialize()` 将偏移量还原为指针，重建数据结构
+3. **类链接**: `opkit_link_classes()` 解析继承关系，链接父类和接口
+4. **符号注册**: `opkit_boot()` 注册函数、类、常量到 Zend Engine
+5. **执行**: `zend_execute()` 执行主 op_array
 
 ---
 
-## 6. 序列化与反序列化
+## 6. 序列化机制
 
-### 6.1 指针序列化
-
-将内存指针转换为相对于脚本基地址的偏移量：
+OpKit 使用指针偏移量序列化技术将内存结构持久化到文件：
 
 ```c
+// 序列化：指针 → 偏移量
 #define SERIALIZE_PTR(ptr) do { \
     if (ptr) { \
         ptr = (void*)((char*)(ptr) - (char*)script->mem); \
     } \
 } while (0)
-```
 
-### 6.2 指针反序列化
-
-将偏移量还原为实际内存指针：
-
-```c
+// 反序列化：偏移量 → 指针
 #define UNSERIALIZE_PTR(ptr) do { \
     if (ptr) { \
-        ptr = (void*)((char*)script->mem + (uintptr_t)(ptr)); \
+        ptr = (void*)((char*)buf + (size_t)(ptr)); \
     } \
 } while (0)
 ```
 
-### 6.3 需要处理的指针类型
-
-- `zend_op_array.opcodes` - 操作码数组
-- `zend_op_array.literals` - 字面量数组
-- `zend_op_array.vars` - 变量名数组
-- `zend_op_array.arg_info` - 参数信息
-- `zend_op_array.static_variables` - 静态变量
-- `zend_class_entry.function_table` - 类方法表
-- `zend_class_entry.properties_info` - 属性信息表
-- `zend_class_entry.constants_table` - 类常量表
-- `zend_class_entry.interfaces` - 接口数组
-- `zend_string` - 字符串结构
+**序列化策略**（详见 [PHPC_FILE_FORMAT.md](./PHPC_FILE_FORMAT.md)）：
+- 普通指针：转换为相对于 `script->mem` 的偏移量
+- Interned 字符串：存储到独立字符串池，偏移量低 1 位标记
+- 环形引用：使用 xlat 表避免重复序列化
+- 需要处理的主要结构：opcodes、literals、类/函数表、属性信息、常量等
 
 ---
 
@@ -658,6 +549,11 @@ opkit/
 │   ├── 01_basic.phpt
 │   ├── 02_directory.phpt
 │   └── ...
+├── docs/                         # 文档
+│   ├── ARCHITECTURE.md          # 架构文档（本文件）
+│   ├── PHPC_FILE_FORMAT.md      # .phpc 文件格式规范
+│   ├── COMPILATION_PROCESS.md   # 编译流程详解
+│   └── ZEND_COMPILE_OPTIONS.md  # Zend 编译选项参考
 ├── config.m4                     # Autotools 配置
 └── CLAUDE.md                     # 开发指南
 ```

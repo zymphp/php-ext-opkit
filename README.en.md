@@ -168,6 +168,19 @@ For the `.phpc` binary files you compile, you can use the `phpc --stubs <dir>` c
 
 ---
 
+## 📚 Documentation
+
+OpKit provides the following technical documentation to help you understand the system implementation:
+
+| Document | Description |
+|----------|-------------|
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | System architecture overview, including module responsibilities, data structures, memory management, and PHP version compatibility |
+| [PHPC_FILE_FORMAT.md](docs/PHPC_FILE_FORMAT.md) | `.phpc` file format specification, detailing file header structure, serialization mechanism, and deserialization process |
+| [COMPILATION_PROCESS.md](docs/COMPILATION_PROCESS.md) | Compilation process details, covering complete compile-time and runtime workflows |
+| [ZEND_COMPILE_OPTIONS.md](docs/ZEND_COMPILE_OPTIONS.md) | Zend compile options reference for debugging and optimization |
+
+---
+
 ## 📚 API Reference
 
 ### Compilation Interface

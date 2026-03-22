@@ -168,6 +168,19 @@ composer opkit-clean
 
 ---
 
+## 📚 文档
+
+OpKit 提供以下技术文档，帮助深入了解系统实现：
+
+| 文档 | 说明 |
+|------|------|
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | 系统架构概览，包含模块职责、数据结构、内存管理和 PHP 版本兼容性说明 |
+| [PHPC_FILE_FORMAT.md](docs/PHPC_FILE_FORMAT.md) | `.phpc` 文件格式规范，详细描述文件头结构、序列化机制和反序列化流程 |
+| [COMPILATION_PROCESS.md](docs/COMPILATION_PROCESS.md) | 编译流程详解，包含编译时和运行时的完整流程 |
+| [ZEND_COMPILE_OPTIONS.md](docs/ZEND_COMPILE_OPTIONS.md) | Zend 编译选项参考，用于调试和优化 |
+
+---
+
 ## 📚 API 参考
 
 ### 编译接口
