@@ -40,9 +40,9 @@ if (!extension_loaded('opkit')) {
      * Boot the OpKit and execute the entry point
      * @param callable|string|null $entry Entry point function/method (default: "main")
      * @param array $args Arguments to pass to the entry point
-     * @return mixed
+     * @return int Exit code from the entry point (0 if no value returned)
      */
-    function opkit_boot(callable|string|null $entry = "main", array $args = []): mixed {}
+    function opkit_boot(callable|string|null $entry = "main", array $args = []): int {}
 
     /**
      * Generate a bootstrap entry Opcode file

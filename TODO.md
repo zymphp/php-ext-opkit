@@ -29,7 +29,7 @@
 - [x] **并发安全性**: 实现原子写入（临时文件 + 重命名）和文件锁，确保多进程环境下文件不会损坏。
 - [x] **性能分析**: `phpc` 提供详细的单个文件编译时间和总耗时统计。
 - [x] **友好错误提示**: 编译失败时捕获并显示具体错误原因，支持跳过错误文件并继续批量编译。
-- [ ] **🔴 opkit_boot 返回值**: 当前返回类型为 `mixed`，当入口函数无返回值时会返回 NULL。应修复为只返回 `int`，无返回值或返回非 int 时返回 0。
+- [x] **🔴 opkit_boot 返回值**: 当前返回类型为 `mixed`，当入口函数无返回值时会返回 NULL。应修复为只返回 `int`，无返回值或返回非 int 时返回 0。
 - [ ] **🔴 新增已加载检测函数**: 新增函数如 `opkit_is_loaded(string $filename): bool` 用于检查指定的 `.phpc` 文件是否已被加载，避免重复加载导致冲突。
 - [ ] **🟡 优化 entry.php 生成格式**: `opkit_gen_entry_file` 生成的入口文件存在多余换行，需优化代码生成逻辑使输出更紧凑。
 
@@ -67,6 +67,10 @@
 - 原始问题: 运行时崩溃 (Termsig=11) 及 4×32-byte `zend_ast_ref` 内存泄漏
 - 根因: PHP 编译器 arena 在 `zend_compile()` 返回前被销毁，但 `IS_CONSTANT_AST` 值（属性/参数默认值中的常量引用）仍指向已释放的 arena 内存。persist 阶段通过 `zend_persist_ast()` 调用 `efree(GC_AST(old_ref))` 释放了子指针而非 `old_ref` 本身，导致泄漏。
 - 修复: 在 `opkit_compile_file()` 中，注册完文件级常量后，遍历所有结构（类属性表、静态成员表、类常量、方法/函数 literals）调用 `zval_update_constant_ex()` 将 `IS_CONSTANT_AST` 解析为实际值。这样 persist 阶段不会遇到已释放的 arena 指针。
+
+**✅ opkit_boot 返回值限定为 int**
+- 问题: 返回类型为 `mixed`，入口函数无返回值时返回 NULL
+- 修复: 两处调用 `main()` 的位置均检查返回值类型，仅 `IS_LONG` 直接返回，其他情况返回 0。同时更新 stub.php 和 arginfo 的返回类型声明为 `int`。
 
 ### 跳过的测试
 - `tests/05_triple_des.phpt` - 需要 openssl 扩展

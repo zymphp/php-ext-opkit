@@ -36,7 +36,7 @@ function opkit_load(string $filename): bool {}
 function opkit_load_multi(array $filenames): void {}
 
 /** Boot the OpKit and execute the entry point */
-function opkit_boot(callable|string|null $entry = "main", array $args = []): mixed {}
+function opkit_boot(callable|string|null $entry = "main", array $args = []): int {}
 
 /** Generate a bootstrap entry Opcode file */
 function opkit_gen_entry_file(string $output_path): bool {}

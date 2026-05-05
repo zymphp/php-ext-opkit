@@ -1537,7 +1537,12 @@ ZEND_FUNCTION(opkit_boot) {
 			if (args) {
 				zend_fcall_info_args_clear(&fci, 1);
 			}
-			RETVAL_ZVAL(&main_retval, 1, 1);
+			if (Z_TYPE(main_retval) == IS_LONG) {
+				RETVAL_LONG(Z_LVAL(main_retval));
+			} else {
+				RETVAL_LONG(0);
+			}
+			zval_ptr_dtor(&main_retval);
 		} else {
 			if (args) {
 				zend_fcall_info_args_clear(&fci, 1);
@@ -1557,7 +1562,12 @@ ZEND_FUNCTION(opkit_boot) {
 			fci_main.retval = &main_retval;
 			fci_cache_main.function_handler = main_func;
 			if (zend_call_function(&fci_main, &fci_cache_main) == SUCCESS) {
-				RETVAL_ZVAL(&main_retval, 1, 1);
+				if (Z_TYPE(main_retval) == IS_LONG) {
+					RETVAL_LONG(Z_LVAL(main_retval));
+				} else {
+					RETVAL_LONG(0);
+				}
+				zval_ptr_dtor(&main_retval);
 			} else {
 				zend_throw_exception(NULL, "Failed to call main function", 0);
 			}
