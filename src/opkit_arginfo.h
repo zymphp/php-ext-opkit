@@ -1,5 +1,5 @@
 /* This is a generated file, edit the .stub.php file instead.
- * Stub hash: a4e4b95fddbbdaa56f8bbc94d3fdfc8d81482f79 */
+ * Stub hash: 8a56999403020a0a0b04e6a2a63399ea4d15748f */
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_opkit_compile_file, 0, 2, _IS_BOOL, 0)
 	ZEND_ARG_TYPE_INFO(0, output_path, IS_STRING, 0)
@@ -31,3 +31,5 @@ ZEND_END_ARG_INFO()
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_opkit_get_info, 0, 1, IS_ARRAY, 1)
 	ZEND_ARG_TYPE_INFO(0, filename, IS_STRING, 0)
 ZEND_END_ARG_INFO()
+
+#define arginfo_opkit_is_loaded arginfo_opkit_load

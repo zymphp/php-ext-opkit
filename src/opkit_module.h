@@ -33,7 +33,7 @@ extern zend_module_entry opkit_module_entry;
 BEGIN_EXTERN_C()
 int start_opkit_module(void);
 void opkit_clean_script_memory(void *mem, size_t size);
-void opkit_keep_memory(zend_persistent_script *script, void *mem_to_free);
+void opkit_keep_memory(zend_persistent_script *script, void *mem_to_free, zend_string *path);
 END_EXTERN_C()
 
 #endif //OPKIT_MODULE_H

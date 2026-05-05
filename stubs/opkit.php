@@ -57,4 +57,11 @@ if (!extension_loaded('opkit')) {
      * @return array|null Metadata about the file or null on failure
      */
     function opkit_get_info(string $filename): ?array {}
+
+    /**
+     * Check if an OpKit Opcode file is already loaded
+     * @param string $filename Path to the .phpc file
+     * @return bool True if the file is loaded, false otherwise
+     */
+    function opkit_is_loaded(string $filename): bool {}
 }

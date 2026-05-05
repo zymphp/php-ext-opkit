@@ -54,6 +54,7 @@ zend_string_table opkit_interned_strings;
 typedef struct _opkit_script_node {
 	zend_persistent_script *script;
 	void *mem_to_free;
+	zend_string *loaded_path;
 	bool executed;
 	struct _opkit_script_node *next;
 } opkit_script_node;
@@ -151,10 +152,11 @@ void opkit_clean_script_items(zend_persistent_script *script) {
 	 */
 }
 
-void opkit_keep_memory(zend_persistent_script *script, void *mem_to_free) {
+void opkit_keep_memory(zend_persistent_script *script, void *mem_to_free, zend_string *path) {
 	opkit_script_node *node = emalloc(sizeof(opkit_script_node));
 	node->script = script;
 	node->mem_to_free = mem_to_free;
+	node->loaded_path = path ? zend_string_init(ZSTR_VAL(path), ZSTR_LEN(path), 0) : NULL;
 	node->executed = false;
 	node->next = loaded_scripts;
 	loaded_scripts = node;
@@ -185,6 +187,9 @@ static void opkit_reset_script(void) {
 		}
 		if (node->mem_to_free) {
 			efree(node->mem_to_free);
+		}
+		if (node->loaded_path) {
+			zend_string_release(node->loaded_path);
 		}
 		efree(node);
 		node = next;
@@ -422,7 +427,7 @@ ZEND_FUNCTION(opkit_load) {
 	zend_string_release(path);
 
 	if (loaded_script) {
-		opkit_keep_memory(loaded_script, loaded_script->mem);
+		opkit_keep_memory(loaded_script, loaded_script->mem, path);
 		RETURN_TRUE;
 	} else {
 		RETURN_FALSE;
@@ -453,11 +458,11 @@ ZEND_FUNCTION(opkit_load_multi) {
 		zend_string_release(resolved_path);
 
 		zend_persistent_script *loaded_script = opkit_compile_script_load(path);
-		zend_string_release(path);
 
 		if (loaded_script) {
-			opkit_keep_memory(loaded_script, loaded_script->mem);
+			opkit_keep_memory(loaded_script, loaded_script->mem, path);
 		}
+		zend_string_release(path);
 	} ZEND_HASH_FOREACH_END();
 }
 
@@ -949,6 +954,42 @@ ZEND_FUNCTION(opkit_get_info)
 	add_assoc_zval(return_value, "constants", &constants);
 
 	efree(buf);
+}
+
+ZEND_FUNCTION(opkit_is_loaded)
+{
+	zend_string *filename;
+
+	ZEND_PARSE_PARAMETERS_START(1, 1)
+		Z_PARAM_STR(filename)
+	ZEND_PARSE_PARAMETERS_END();
+
+	zend_string *resolved = opkit_resolve_path(filename);
+	if (!resolved) {
+		RETURN_FALSE;
+	}
+
+	/* Also try with .phpc suffix applied (for users who pass the source .php path) */
+	char *full_path = opkit_compile_get_phpc_file_path(NULL, resolved);
+	zend_string *phpc_path = zend_string_init(full_path, strlen(full_path), 0);
+	efree(full_path);
+
+	opkit_script_node *node = loaded_scripts;
+	while (node) {
+		if (node->loaded_path) {
+			if (zend_string_equals(resolved, node->loaded_path) ||
+			    zend_string_equals(phpc_path, node->loaded_path)) {
+				zend_string_release(phpc_path);
+				zend_string_release(resolved);
+				RETURN_TRUE;
+			}
+		}
+		node = node->next;
+	}
+
+	zend_string_release(phpc_path);
+	zend_string_release(resolved);
+	RETURN_FALSE;
 }
 
 static zend_string *opkit_string_replace(zend_string *haystack, zend_string *needle, zend_string *replacement) {
@@ -1718,6 +1759,7 @@ static const zend_function_entry opkit_functions[] = {
 	ZEND_FE(opkit_boot, arginfo_opkit_boot)
 	ZEND_FE(opkit_gen_entry_file, arginfo_opkit_gen_entry_file)
 	ZEND_FE(opkit_get_info, arginfo_opkit_get_info)
+	ZEND_FE(opkit_is_loaded, arginfo_opkit_is_loaded)
 	ZEND_FE_END
 };
 

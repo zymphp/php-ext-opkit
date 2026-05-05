@@ -43,3 +43,6 @@ function opkit_gen_entry_file(string $output_path): bool {}
 
 /** Get information about an OpKit Opcode file */
 function opkit_get_info(string $filename): ?array {}
+
+/** Check if an OpKit Opcode file is already loaded */
+function opkit_is_loaded(string $filename): bool {}

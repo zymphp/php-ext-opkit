@@ -2239,7 +2239,7 @@ int opkit_compile_script_store(zend_string *output_path, zend_persistent_script 
 	efree(tmp_filename);
 	efree(buf_mem_to_free);
 
-	opkit_keep_memory(script, mem_to_free);
+	opkit_keep_memory(script, mem_to_free, NULL);
 
 	return SUCCESS;
 
