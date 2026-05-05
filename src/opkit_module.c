@@ -1691,8 +1691,7 @@ ZEND_FUNCTION(opkit_gen_entry_file) {
 	opkit_collect_phpc_files(stream, dir, base_dir_len);
 	php_stream_puts(stream, "]);\n");
 
-	php_stream_puts(stream, "\n$result = opkit_boot();\n");
-	php_stream_puts(stream, "exit($result ?? 0);\n");
+	php_stream_puts(stream, "\nexit(opkit_boot());\n");
 
 	php_stream_close(stream);
 	efree(dir);

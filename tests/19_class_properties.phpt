@@ -50,7 +50,7 @@ if ($result && file_exists($phpcFile)) {
     opkit_load($phpcFile);
     echo "Booting...\n";
     $exitCode = opkit_boot();
-    echo "Exit code: " . ($exitCode ?? 0) . "\n";
+    echo "Exit code: " . $exitCode . "\n";
 }
 
 // Clean up
