@@ -233,12 +233,22 @@ static void zend_persist_zval(zval *z)
 			if (new_ptr) {
 				Z_AST_P(z) = new_ptr;
 				Z_TYPE_FLAGS_P(z) = 0;
-			} else {
-				zend_ast_ref *old_ref = Z_AST_P(z);
-				zend_ast_ref *new_ref = zend_shared_memdup_put(old_ref, sizeof(zend_ast_ref));
-				Z_AST_P(z) = new_ref;
-				((zend_ast_ref*)(new_ref))->gc.u.type_info = (uintptr_t)zend_persist_ast((zend_ast*)(uintptr_t)old_ref->gc.u.type_info);
-				Z_TYPE_FLAGS_P(z) = 0;
+	} else {
+		zend_ast_ref *old_ref = Z_AST_P(z);
+		zend_ast_ref *new_ref = zend_shared_memdup_put(old_ref, sizeof(zend_ast_ref));
+		Z_AST_P(z) = new_ref;
+		zend_ast *ast_ptr = (zend_ast*)(uintptr_t)old_ref->gc.u.type_info;
+		if (EXPECTED((uintptr_t)ast_ptr > 65536)) {
+			((zend_ast_ref*)(new_ref))->gc.u.type_info = (uintptr_t)zend_persist_ast(ast_ptr);
+		} else {
+			/* AST pointer is corrupted (arena already destroyed by PHP compiler).
+			 * This happens for IS_CONSTANT_AST values that reference compile-time
+			 * constant expressions (e.g. self::CONST in arrays, function defaults).
+			 * The constant value cannot be recovered; it will be IS_NULL at runtime. */
+			((zend_ast_ref*)(new_ref))->gc.u.type_info = 0;
+			ZVAL_NULL(z);
+		}
+		Z_TYPE_FLAGS_P(z) = 0;
 				GC_SET_REFCOUNT(new_ref, 1);
 				GC_ADD_FLAGS(new_ref, GC_IMMUTABLE);
 				efree(old_ref);
@@ -557,6 +567,12 @@ static void zend_persist_class_constant(zval *zv, zend_class_entry *ce)
 		return;
 	}
 
+	if (((c->ce->ce_flags & ZEND_ACC_IMMUTABLE) && !(Z_CONSTANT_FLAGS(c->value) & CONST_OWNED))
+	 || c->ce->type == ZEND_INTERNAL_CLASS) {
+		/* Class constant comes from a different file in shm or internal class, keep existing pointer. */
+		return;
+	}
+
 	copy = _opkit_shared_memdup_put_md(c, sizeof(zend_class_constant));
 	/* Try to convert ce through xlat table (for inherited constants) */
 	zend_class_entry *new_ce = zend_shared_alloc_get_xlat_entry(copy->ce);
@@ -679,11 +695,21 @@ zend_class_entry *zend_persist_class_entry(zend_class_entry *orig_ce)
 	} ZEND_HASH_FOREACH_END();
 	HT_FLAGS(&ce->constants_table) &= (HASH_FLAG_UNINITIALIZED | HASH_FLAG_STATIC_KEYS);
 
-	if (ce->num_interfaces && ce->interfaces) {
-		/* Interfaces are pointers to CE. We will fix them later in zend_update_parent_ce */
-		void *old_interfaces = ce->interfaces;
-		ce->interfaces = _opkit_shared_memdup_put_dt(ce->interfaces, sizeof(zend_class_entry *) * ce->num_interfaces);
-		efree(old_interfaces);
+	if (ce->num_interfaces) {
+		if (!(ce->ce_flags & ZEND_ACC_LINKED)) {
+			for (uint32_t i = 0; i < ce->num_interfaces; i++) {
+				zend_accel_store_interned_string(ce->interface_names[i].name);
+				zend_accel_store_interned_string(ce->interface_names[i].lc_name);
+			}
+			void *old_interface_names = ce->interface_names;
+			ce->interface_names = _opkit_shared_memdup_put_dt(ce->interface_names, sizeof(zend_class_name) * ce->num_interfaces);
+			efree(old_interface_names);
+		} else if (ce->interfaces) {
+			/* Interfaces are pointers to CE. We will fix them later in zend_update_parent_ce */
+			void *old_interfaces = ce->interfaces;
+			ce->interfaces = _opkit_shared_memdup_put_dt(ce->interfaces, sizeof(zend_class_entry *) * ce->num_interfaces);
+			efree(old_interfaces);
+		}
 	}
 
 	if (ce->num_traits && ce->trait_names) {

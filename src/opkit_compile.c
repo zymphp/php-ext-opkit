@@ -1171,6 +1171,15 @@ static void zend_file_cache_unserialize_class(zval *zv, zend_persistent_script *
 
 	zend_file_cache_unserialize_hash(&ce->constants_table, script, buf, zend_file_cache_unserialize_class_constant, NULL);
 
+	/* Reinitialize empty constants_table so that zend_hash_find_known_hash()
+	 * (used by do_inherit_constant_check) doesn't crash on uninitialized buckets.
+	 * After zend_hash_persist, empty tables get HASH_FLAG_UNINITIALIZED with
+	 * arData = &uninitialized_bucket, which is not safe for bucket-based searches. */
+	if (ce->constants_table.nNumUsed == 0
+	 && (HT_FLAGS(&ce->constants_table) & HASH_FLAG_UNINITIALIZED)) {
+		zend_hash_init(&ce->constants_table, 0, NULL, NULL, 0);
+	}
+
 	/* Unserialize magic methods */
 	UNSERIALIZE_PTR(ce->constructor);
 	UNSERIALIZE_PTR(ce->destructor);
@@ -1196,7 +1205,96 @@ static void zend_file_cache_unserialize_class(zval *zv, zend_persistent_script *
 	}
 	UNSERIALIZE_ATTRIBUTES(ce->attributes);
 
-		if (!(script->corrupted)) {
+	if (ce->num_interfaces) {
+		uint32_t i;
+		ZEND_ASSERT(!(ce->ce_flags & ZEND_ACC_LINKED));
+		UNSERIALIZE_PTR(ce->interface_names);
+		for (i = 0; i < ce->num_interfaces; i++) {
+			UNSERIALIZE_STR(ce->interface_names[i].name);
+			UNSERIALIZE_STR(ce->interface_names[i].lc_name);
+		}
+	}
+
+	if (ce->num_traits) {
+		uint32_t i;
+		zend_class_name *old_trait_names;
+		UNSERIALIZE_PTR(ce->trait_names);
+		old_trait_names = ce->trait_names;
+		for (i = 0; i < ce->num_traits; i++) {
+			UNSERIALIZE_STR(old_trait_names[i].name);
+			UNSERIALIZE_STR(old_trait_names[i].lc_name);
+		}
+		/* Copy trait_names to heap so _destroy_zend_class_traits_info can efree it */
+		ce->trait_names = emalloc(sizeof(zend_class_name) * ce->num_traits);
+		memcpy(ce->trait_names, old_trait_names, sizeof(zend_class_name) * ce->num_traits);
+
+		if (ce->trait_aliases) {
+			zend_trait_alias **src_array, *q;
+			int count = 0;
+			UNSERIALIZE_PTR(ce->trait_aliases);
+			src_array = ce->trait_aliases;
+			while (src_array[count]) {
+				UNSERIALIZE_PTR(src_array[count]);
+				q = src_array[count];
+				if (q->trait_method.method_name) {
+					UNSERIALIZE_STR(q->trait_method.method_name);
+				}
+				if (q->trait_method.class_name) {
+					UNSERIALIZE_STR(q->trait_method.class_name);
+				}
+				if (q->alias) {
+					UNSERIALIZE_STR(q->alias);
+				}
+				count++;
+			}
+			ce->trait_aliases = emalloc(sizeof(zend_trait_alias *) * (count + 1));
+			memcpy(ce->trait_aliases, src_array, sizeof(zend_trait_alias *) * (count + 1));
+		}
+
+		if (ce->trait_precedences) {
+			zend_trait_precedence **src_array, *q;
+			uint32_t j;
+			int count = 0;
+			UNSERIALIZE_PTR(ce->trait_precedences);
+			src_array = ce->trait_precedences;
+			while (src_array[count]) {
+				UNSERIALIZE_PTR(src_array[count]);
+				q = src_array[count];
+				if (q->trait_method.method_name) {
+					UNSERIALIZE_STR(q->trait_method.method_name);
+				}
+				if (q->trait_method.class_name) {
+					UNSERIALIZE_STR(q->trait_method.class_name);
+				}
+				for (j = 0; j < q->num_excludes; j++) {
+					UNSERIALIZE_STR(q->exclude_class_names[j]);
+				}
+				count++;
+			}
+			ce->trait_precedences = emalloc(sizeof(zend_trait_precedence *) * (count + 1));
+			memcpy(ce->trait_precedences, src_array, sizeof(zend_trait_precedence *) * (count + 1));
+		}
+	}
+
+	if (ce->iterator_funcs_ptr) {
+		UNSERIALIZE_PTR(ce->iterator_funcs_ptr);
+		UNSERIALIZE_PTR(ce->iterator_funcs_ptr->zf_new_iterator);
+		UNSERIALIZE_PTR(ce->iterator_funcs_ptr->zf_rewind);
+		UNSERIALIZE_PTR(ce->iterator_funcs_ptr->zf_valid);
+		UNSERIALIZE_PTR(ce->iterator_funcs_ptr->zf_key);
+		UNSERIALIZE_PTR(ce->iterator_funcs_ptr->zf_current);
+		UNSERIALIZE_PTR(ce->iterator_funcs_ptr->zf_next);
+	}
+
+	if (ce->arrayaccess_funcs_ptr) {
+		UNSERIALIZE_PTR(ce->arrayaccess_funcs_ptr);
+		UNSERIALIZE_PTR(ce->arrayaccess_funcs_ptr->zf_offsetget);
+		UNSERIALIZE_PTR(ce->arrayaccess_funcs_ptr->zf_offsetexists);
+		UNSERIALIZE_PTR(ce->arrayaccess_funcs_ptr->zf_offsetset);
+		UNSERIALIZE_PTR(ce->arrayaccess_funcs_ptr->zf_offsetunset);
+	}
+
+	if (!(script->corrupted)) {
 		ce->ce_flags |= ZEND_ACC_IMMUTABLE;
 		ce->ce_flags &= ~ZEND_ACC_FILE_CACHED;
 		ZEND_MAP_PTR_NEW(ce->mutable_data);
@@ -1423,8 +1521,6 @@ zend_persistent_script *opkit_compile_file(zend_file_handle *file_handle, int ty
 		CG(compiler_options) |= ZEND_COMPILE_HANDLE_OP_ARRAY;
 		CG(compiler_options) |= ZEND_COMPILE_IGNORE_OBSERVER;
 		CG(compiler_options) |= ZEND_COMPILE_WITH_FILE_CACHE;
-
-		CG(compiler_options) |= ZEND_COMPILE_NO_CONSTANT_SUBSTITUTION;
 		CG(compiler_options) |= ZEND_COMPILE_IGNORE_OTHER_FILES;
 
 		op_array = *op_array_p = zend_compile_file(file_handle, type);

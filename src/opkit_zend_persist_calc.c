@@ -144,13 +144,16 @@ static void zend_persist_zval_calc(zval *z)
 				}
 			}
 			break;
-		case IS_CONSTANT_AST:
-			size = zend_shared_memdup_size(Z_AST_P(z), sizeof(zend_ast_ref));
-			if (size) {
-				ADD_SIZE(size);
-				zend_persist_ast_calc(Z_ASTVAL_P(z));
+	case IS_CONSTANT_AST:
+		size = zend_shared_memdup_size(Z_AST_P(z), sizeof(zend_ast_ref));
+		if (size) {
+			ADD_SIZE(size);
+			zend_ast *ast_ptr = Z_ASTVAL_P(z);
+			if (EXPECTED((uintptr_t)ast_ptr > 65536)) {
+				zend_persist_ast_calc(ast_ptr);
 			}
-			break;
+		}
+		break;
 		default:
 			ZEND_ASSERT(Z_TYPE_P(z) < IS_STRING);
 			break;
@@ -420,14 +423,16 @@ static void zend_persist_class_constant_calc(zval *zv)
 			/* Class constant comes from a different file in shm or internal class, keep existing pointer. */
 			return;
 		}
+		if (!ZCG(current_persistent_script)->corrupted
+		 && zend_accel_in_shm(Z_PTR_P(zv))) {
+			return;
+		}
 		zend_shared_alloc_register_xlat_entry(c, c);
 		ADD_SIZE(sizeof(zend_class_constant));
 		zend_persist_zval_calc(&c->value);
-#if PHP_VERSION_ID < 80400
 		if (ZCG(accel_directives).save_comments && c->doc_comment) {
 			ADD_STRING(c->doc_comment);
 		}
-#endif
 		if (c->attributes) {
 			zend_persist_attributes_calc(c->attributes);
 		}
