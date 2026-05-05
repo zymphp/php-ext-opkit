@@ -51,7 +51,7 @@ First compilation:
 --------------------------------------------------
 OpKit is compiling (incremental mode)...
 PHP Version: %s
-Source: %s/src
+Sources: %s/src
 Output: %s/out
 --------------------------------------------------
 [COMPILE] test.php (%fs)
@@ -63,7 +63,7 @@ Second compilation (no changes):
 --------------------------------------------------
 OpKit is compiling (incremental mode)...
 PHP Version: %s
-Source: %s/src
+Sources: %s/src
 Output: %s/out
 --------------------------------------------------
 
@@ -74,7 +74,7 @@ Third compilation (after change):
 --------------------------------------------------
 OpKit is compiling (incremental mode)...
 PHP Version: %s
-Source: %s/src
+Sources: %s/src
 Output: %s/out
 --------------------------------------------------
 [COMPILE] test.php (%fs)
@@ -86,7 +86,7 @@ Fourth compilation (force):
 --------------------------------------------------
 OpKit is compiling (incremental mode) [force]...
 PHP Version: %s
-Source: %s/src
+Sources: %s/src
 Output: %s/out
 --------------------------------------------------
 [COMPILE] test.php (%fs)

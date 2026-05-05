@@ -10,7 +10,7 @@
 
 ## 工具与易用性
 - [x] **phpc 配置支持**: 支持通过 `opkit.json` 配置文件管理编译参数。
-- [ ] **🟡 phpc 配置增强**: 支持多路径配置（数组形式）、通配符匹配（如 `src/**/*Controller.php`）及 `exclude` 忽略路径配置。
+- [x] **🟡 phpc 配置增强**: 支持多路径配置（数组形式）、通配符匹配（如 `src/*/Controller.php`）及 `exclude` 忽略路径配置。
 - [x] **增量编译**: 基于源码修改时间、System ID 和 Magic 值的智能增量编译。
 - [x] **交互式信息查看**: 增强 `phpc -i` 以支持列出详细的方法签名和类属性。
   - [ ] **🟡 显示类属性的完整类型信息**（如 `public string $name`）
@@ -67,6 +67,10 @@
 - 原始问题: 运行时崩溃 (Termsig=11) 及 4×32-byte `zend_ast_ref` 内存泄漏
 - 根因: PHP 编译器 arena 在 `zend_compile()` 返回前被销毁，但 `IS_CONSTANT_AST` 值（属性/参数默认值中的常量引用）仍指向已释放的 arena 内存。persist 阶段通过 `zend_persist_ast()` 调用 `efree(GC_AST(old_ref))` 释放了子指针而非 `old_ref` 本身，导致泄漏。
 - 修复: 在 `opkit_compile_file()` 中，注册完文件级常量后，遍历所有结构（类属性表、静态成员表、类常量、方法/函数 literals）调用 `zval_update_constant_ex()` 将 `IS_CONSTANT_AST` 解析为实际值。这样 persist 阶段不会遇到已释放的 arena 指针。
+
+**✅ phpc 配置增强**
+- 问题: 仅支持单个 `src` 路径，不支持通配符和排除
+- 修复: `src` 支持字符串或数组，支持 `glob()` 通配符模式（`*`, `?`, `[]`），新增 `exclude` 配置项（`fnmatch` 匹配），配置路径可相对于 opkit.json 所在目录
 
 **✅ opkit_boot 返回值限定为 int**
 - 问题: 返回类型为 `mixed`，入口函数无返回值时返回 NULL

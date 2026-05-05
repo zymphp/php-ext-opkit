@@ -39,7 +39,7 @@ foreach (glob("$target/*") as $f) @unlink($f);
 --------------------------------------------------
 OpKit is compiling (incremental mode) [force]...
 PHP Version: %s
-Source: %s
+Sources: %s
 Output: %s
 --------------------------------------------------
 [COMPILE] %s (%fs)
