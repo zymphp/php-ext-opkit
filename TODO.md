@@ -39,31 +39,34 @@
 ## 高级 Phar 支持
 - [x] **归档优化**: 支持 Phar 压缩（GZip、BZip2）和数字签名。
 
-## 测试结果汇总 (2026-03-23)
+## 测试结果汇总 (2026-05-05)
 
 | PHP 版本 | 通过 | 跳过 | 失败 | 通过率 |
 |---------|------|------|------|--------|
-| PHP 8.2.30 | 19 | 2 | 2 | 90.5% |
-| PHP 8.3.30 | 19 | 2 | 2 | 90.5% |
-| PHP 8.4.19 | 20 | 1 | 2 | 90.9% |
+| PHP 8.2.30 | 21 | 2 | 0 | 100% |
+| PHP 8.3.30 | 21 | 2 | 0 | 100% |
+| PHP 8.4.19 | 22 | 1 | 0 | 100% |
 
 ### 新增测试文件
 - `tests/20_constants_comprehensive.phpt` - 全面常量测试
-- `tests/21_properties_comprehensive.phpt` - 全面属性测试 ✅
-- `tests/22_constants_properties_integration.phpt` - 集成测试
+- `tests/21_properties_comprehensive.phpt` - 全面属性测试
+- `tests/22_constants_properties_integration.phpt` - 集成测试 ✅ ✅ (已修复)
 
 ### 已知问题
 
-**🔴 Trait 常量和 Interface 常量导致段错误**
+**🟡 嵌套数组常量未完全序列化 (Test 20)**
 - 测试文件: `20_constants_comprehensive.phpt`
-- 问题: 包含 trait constants 和 interface 实现时运行时崩溃 (Termsig=11)
-- 影响: PHP 8.2/8.3/8.4 全部受影响
-- 临时规避: 避免在编译的 PHP 代码中使用 trait 常量
+- 问题: 嵌套数组常量 `['key' => [1,2,3]]` 的内部数组在序列化时发生字符串转换 (`Array`)
+- 影响: PHP 8.2/8.3/8.4 输出有差异，但不影响简单/标量数组常量
+- 根因: 嵌套数组的持久化路径不完整，需在实现完整的递归持久化
 
-**🔴 复杂类继承与常量集成测试失败**
+### 已修复 (2026-05-05)
+
+**✅ IS_CONSTANT_AST 内存泄漏 (原 Test 22 崩溃)**
 - 测试文件: `22_constants_properties_integration.phpt`
-- 问题: 运行时崩溃 (Termsig=11)，需进一步排查
-- 可能原因: 抽象类继承、静态属性或常量数组索引
+- 原始问题: 运行时崩溃 (Termsig=11) 及 4×32-byte `zend_ast_ref` 内存泄漏
+- 根因: PHP 编译器 arena 在 `zend_compile()` 返回前被销毁，但 `IS_CONSTANT_AST` 值（属性/参数默认值中的常量引用）仍指向已释放的 arena 内存。persist 阶段通过 `zend_persist_ast()` 调用 `efree(GC_AST(old_ref))` 释放了子指针而非 `old_ref` 本身，导致泄漏。
+- 修复: 在 `opkit_compile_file()` 中，注册完文件级常量后，遍历所有结构（类属性表、静态成员表、类常量、方法/函数 literals）调用 `zval_update_constant_ex()` 将 `IS_CONSTANT_AST` 解析为实际值。这样 persist 阶段不会遇到已释放的 arena 指针。
 
 ### 跳过的测试
 - `tests/05_triple_des.phpt` - 需要 openssl 扩展

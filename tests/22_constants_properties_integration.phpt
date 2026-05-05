@@ -201,7 +201,3 @@ OK message: OK
 === Final Class ===
 Setting1: test
 Setting2: 123
-%s
-%s
-Last leak repeated %d times
-=== Total %d memory leaks detected ===

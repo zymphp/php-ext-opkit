@@ -1577,6 +1577,101 @@ zend_persistent_script *opkit_compile_file(zend_file_handle *file_handle, int ty
 			}
 		}
 
+		/* Resolve remaining IS_CONSTANT_AST values now that file-level constants
+		 * are registered in EG(zend_constants). Without this, the persist phase
+		 * would try to copy from already-freed AST arena memory, and would call
+		 * efree() on sub-pointers (GC_AST(old_ref)) instead of the actual
+		 * zend_ast_ref allocation, causing memory leaks. */
+		if (op_array && file_handle->filename) {
+			zend_string *fname = file_handle->opened_path ? file_handle->opened_path : file_handle->filename;
+
+			/* Main op_array literals (function parameter defaults, etc.) */
+			if (op_array->literals) {
+				for (uint32_t i = 0; i < op_array->last_literal; i++) {
+					zval *zv = &op_array->literals[i];
+					if (Z_TYPE_P(zv) == IS_CONSTANT_AST) {
+						zval_update_constant_ex(zv, op_array->scope);
+					}
+				}
+			}
+
+			/* Class entries: property defaults, static members, class constants */
+			{
+				zend_class_entry *ce;
+				ZEND_HASH_FOREACH_PTR(CG(class_table), ce) {
+					if (ce->type != ZEND_USER_CLASS) continue;
+					if (ce->info.user.filename != fname) continue;
+
+					/* Default properties table */
+					if (ce->default_properties_table) {
+						for (uint32_t i = 0; i < ce->default_properties_count; i++) {
+							zval *zv = &ce->default_properties_table[i];
+							if (Z_TYPE_P(zv) == IS_CONSTANT_AST) {
+								zend_class_entry *scope = ce;
+								if (ce->properties_info_table && ce->properties_info_table[i]) {
+									scope = ce->properties_info_table[i]->ce;
+								}
+								zval_update_constant_ex(zv, scope);
+							}
+						}
+					}
+
+					/* Default static members table */
+					if (ce->default_static_members_table) {
+						for (uint32_t i = 0; i < ce->default_static_members_count; i++) {
+							zval *zv = &ce->default_static_members_table[i];
+							if (Z_TYPE_P(zv) == IS_CONSTANT_AST) {
+								zval_update_constant_ex(zv, ce);
+							}
+						}
+					}
+
+					/* Class constants */
+					{
+						zend_class_constant *c;
+						ZEND_HASH_FOREACH_PTR(&ce->constants_table, c) {
+							if (Z_TYPE(c->value) == IS_CONSTANT_AST) {
+								zval_update_constant_ex(&c->value, c->ce);
+							}
+						} ZEND_HASH_FOREACH_END();
+					}
+
+					/* Method op_array literals */
+					{
+						zend_function *method;
+						ZEND_HASH_FOREACH_PTR(&ce->function_table, method) {
+							if (method->type != ZEND_USER_FUNCTION) continue;
+							zend_op_array *func = &method->op_array;
+							if (!func->literals) continue;
+							for (uint32_t j = 0; j < func->last_literal; j++) {
+								zval *zv = &func->literals[j];
+								if (Z_TYPE_P(zv) == IS_CONSTANT_AST) {
+									zval_update_constant_ex(zv, func->scope);
+								}
+							}
+						} ZEND_HASH_FOREACH_END();
+					}
+				} ZEND_HASH_FOREACH_END();
+			}
+
+			/* File-level function op_array literals */
+			{
+				zend_function *func;
+				ZEND_HASH_FOREACH_PTR(CG(function_table), func) {
+					if (func->type != ZEND_USER_FUNCTION) continue;
+					zend_op_array *fop = &func->op_array;
+					if (fop->filename != fname) continue;
+					if (!fop->literals) continue;
+					for (uint32_t j = 0; j < fop->last_literal; j++) {
+						zval *zv = &fop->literals[j];
+						if (Z_TYPE_P(zv) == IS_CONSTANT_AST) {
+							zval_update_constant_ex(zv, fop->scope);
+						}
+					}
+				} ZEND_HASH_FOREACH_END();
+			}
+		}
+
 		CG(compiler_options) = orig_compiler_options;
 	} zend_catch {
 		op_array = NULL;
