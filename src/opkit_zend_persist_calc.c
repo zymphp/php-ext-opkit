@@ -144,16 +144,17 @@ static void zend_persist_zval_calc(zval *z)
 				}
 			}
 			break;
-	case IS_CONSTANT_AST:
-		size = zend_shared_memdup_size(Z_AST_P(z), sizeof(zend_ast_ref));
-		if (size) {
-			ADD_SIZE(size);
-			zend_ast *ast_ptr = Z_ASTVAL_P(z);
-			if (EXPECTED((uintptr_t)ast_ptr > 65536)) {
-				zend_persist_ast_calc(ast_ptr);
+	case IS_CONSTANT_AST: {
+		zend_ast *ast_ptr = Z_ASTVAL_P(z);
+		if ((uintptr_t)ast_ptr > 4096) {
+			if (ast_ptr->kind == ZEND_AST_ZVAL || ast_ptr->kind == ZEND_AST_CONSTANT) {
+				ADD_SIZE(sizeof(zend_ast_ref));
+				ADD_SIZE_MS(sizeof(zend_ast_zval));
+				zend_persist_zval_calc(&((zend_ast_zval*)ast_ptr)->val);
 			}
 		}
 		break;
+	}
 		default:
 			ZEND_ASSERT(Z_TYPE_P(z) < IS_STRING);
 			break;

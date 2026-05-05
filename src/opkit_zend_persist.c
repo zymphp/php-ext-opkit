@@ -233,25 +233,21 @@ static void zend_persist_zval(zval *z)
 			if (new_ptr) {
 				Z_AST_P(z) = new_ptr;
 				Z_TYPE_FLAGS_P(z) = 0;
-	} else {
-		zend_ast_ref *old_ref = Z_AST_P(z);
-		zend_ast_ref *new_ref = zend_shared_memdup_put(old_ref, sizeof(zend_ast_ref));
-		Z_AST_P(z) = new_ref;
-		zend_ast *ast_ptr = (zend_ast*)(uintptr_t)old_ref->gc.u.type_info;
-		if (EXPECTED((uintptr_t)ast_ptr > 65536)) {
-			((zend_ast_ref*)(new_ref))->gc.u.type_info = (uintptr_t)zend_persist_ast(ast_ptr);
-		} else {
-			/* AST pointer is corrupted (arena already destroyed by PHP compiler).
-			 * This happens for IS_CONSTANT_AST values that reference compile-time
-			 * constant expressions (e.g. self::CONST in arrays, function defaults).
-			 * The constant value cannot be recovered; it will be IS_NULL at runtime. */
-			((zend_ast_ref*)(new_ref))->gc.u.type_info = 0;
-			ZVAL_NULL(z);
-		}
-		Z_TYPE_FLAGS_P(z) = 0;
-				GC_SET_REFCOUNT(new_ref, 1);
-				GC_ADD_FLAGS(new_ref, GC_IMMUTABLE);
-				efree(old_ref);
+			} else {
+				zend_ast_ref *old_ref = Z_AST_P(z);
+				zend_ast *ast = GC_AST(old_ref);
+
+				/* Only ZEND_AST_ZVAL and ZEND_AST_CONSTANT are self-contained
+				 * (allocated on the ZendMM heap, no children in the arena).
+				 * Complex ASTs (ZEND_AST_CLASS_CONST etc.) have children that
+				 * point to freed arena memory and cannot be persisted safely. */
+				if (ast->kind == ZEND_AST_ZVAL || ast->kind == ZEND_AST_CONSTANT) {
+					Z_AST_P(z) = zend_shared_memdup_put(old_ref, sizeof(zend_ast_ref));
+					zend_persist_ast(ast);
+				} else {
+					ZVAL_NULL(z);
+				}
+				Z_TYPE_FLAGS_P(z) = 0;
 			}
 			break;
 	default:
