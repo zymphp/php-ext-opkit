@@ -82,7 +82,7 @@ function main() {
     echo "Float: " . NAMESPACE_CONST_FLOAT . "\n";
     echo "Bool: " . (NAMESPACE_CONST_BOOL ? 'true' : 'false') . "\n";
     echo "Null: " . (NAMESPACE_CONST_NULL === null ? 'null' : 'not null') . "\n";
-    echo "Array: " . implode(',', NAMESPACE_CONST_ARRAY) . "\n";
+    echo "Array: " . NAMESPACE_CONST_ARRAY['key1'] . ',' . implode(',', NAMESPACE_CONST_ARRAY['key2']) . "\n";
 
     // Test define() constants
     echo "\n=== Define Constants ===\n";

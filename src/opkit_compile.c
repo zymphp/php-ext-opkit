@@ -1406,6 +1406,21 @@ zend_persistent_script *opkit_compile_script_load(zend_string *filename)
 
 	zend_file_cache_unserialize(script, buf);
 
+	/* Register file-level constants from the loaded script into EG(zend_constants)
+	 * so that zval_update_constant_ex() can resolve constant references
+	 * (e.g. DEFAULT_NAME used as default property/parameter value). */
+	{
+		zend_constant *zc;
+		dtor_func_t orig_const_dtor = EG(zend_constants)->pDestructor;
+		EG(zend_constants)->pDestructor = NULL;
+		ZEND_HASH_FOREACH_PTR(&((opkit_persistent_script*)script)->constants_table, zc) {
+			if (zc->name) {
+				zend_hash_update_ptr(EG(zend_constants), zc->name, zc);
+			}
+		} ZEND_HASH_FOREACH_END();
+		EG(zend_constants)->pDestructor = orig_const_dtor;
+	}
+
 	/* Process class constants during load
 	 * This handles default_properties_count and other constant expressions
 	 */
@@ -1524,6 +1539,31 @@ zend_persistent_script *opkit_compile_file(zend_file_handle *file_handle, int ty
 		CG(compiler_options) |= ZEND_COMPILE_IGNORE_OTHER_FILES;
 
 		op_array = *op_array_p = zend_compile_file(file_handle, type);
+
+		/* Register file-level const declarations from ZEND_DECLARE_CONST opcodes
+		 * into EG(zend_constants) so pass_two() and zend_accel_move_user_constants()
+		 * can handle them. ZEND_COMPILE_WITHOUT_EXECUTION prevents runtime execution
+		 * of these opcodes, so we register them manually. */
+		if (op_array) {
+			zend_op *opline_iter = op_array->opcodes;
+			zend_op *end_iter = opline_iter + op_array->last;
+			while (opline_iter < end_iter) {
+				if (opline_iter->opcode == ZEND_DECLARE_CONST) {
+					zval *name_zv = RT_CONSTANT(opline_iter, opline_iter->op1);
+					zval *val_zv = RT_CONSTANT(opline_iter, opline_iter->op2);
+					zend_constant *c = pemalloc(sizeof(zend_constant), 0);
+
+					c->name = zend_string_copy(Z_STR_P(name_zv));
+					ZVAL_DUP(&c->value, val_zv);
+					if (Z_OPT_CONSTANT(c->value)) {
+						zval_update_constant_ex(&c->value, op_array->scope);
+					}
+					ZEND_CONSTANT_SET_FLAGS(c, 0, PHP_USER_CONSTANT);
+					zend_hash_add_ptr(EG(zend_constants), c->name, c);
+				}
+				opline_iter++;
+			}
+		}
 
 		/* Mark newly defined constants as belonging to the current script so they can be moved later */
 		if (EG(zend_constants)->nNumUsed > orig_constants_count) {

@@ -169,7 +169,7 @@ if (opkit_compile_file(__DIR__, $src)) {
 @unlink($src);
 @unlink($output);
 ?>
---EXPECT--
+--EXPECTF--
 === Inheritance and Constants ===
 User ID starts with: entity_
 Public const: public from base
@@ -201,3 +201,7 @@ OK message: OK
 === Final Class ===
 Setting1: test
 Setting2: 123
+%s
+%s
+Last leak repeated %d times
+=== Total %d memory leaks detected ===

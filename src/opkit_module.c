@@ -1492,7 +1492,8 @@ ZEND_FUNCTION(opkit_boot) {
 		while (opline < opline_end) {
 			if (opline->opcode == ZEND_DECLARE_FUNCTION ||
 				opline->opcode == ZEND_DECLARE_CLASS ||
-				opline->opcode == ZEND_DECLARE_CLASS_DELAYED) {
+				opline->opcode == ZEND_DECLARE_CLASS_DELAYED ||
+				opline->opcode == ZEND_DECLARE_CONST) {
 				opline->opcode = ZEND_NOP;
 				zend_vm_set_opcode_handler(opline);
 			}
