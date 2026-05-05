@@ -1679,7 +1679,7 @@ ZEND_FUNCTION(opkit_gen_entry_file) {
 		dir = estrdup(".");
 	}
 
-	php_stream_puts(stream, "<?php\n"
+	php_stream_printf(stream, "<?php\n"
 		"\n"
 		"if (!extension_loaded('opkit')) {\n"
 		"    if (!@dl('opkit.so')) {\n"
@@ -1692,7 +1692,7 @@ ZEND_FUNCTION(opkit_gen_entry_file) {
 	size_t base_dir_len = strlen(dir);
 	opkit_collect_phpc_files(stream, dir, base_dir_len);
 
-	php_stream_puts(stream, "]);\n"
+	php_stream_printf(stream, "]);\n"
 		"\n"
 		"exit(opkit_boot());\n");
 
