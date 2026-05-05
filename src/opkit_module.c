@@ -1679,19 +1679,22 @@ ZEND_FUNCTION(opkit_gen_entry_file) {
 		dir = estrdup(".");
 	}
 
-	php_stream_puts(stream, "<?php\n\n");
-	php_stream_puts(stream, "if (!extension_loaded('opkit')) {\n");
-	php_stream_puts(stream, "    if (!@dl('opkit.so')) {\n");
-	php_stream_puts(stream, "        trigger_error('OpKit extension not loaded', E_USER_ERROR);\n");
-	php_stream_puts(stream, "    }\n");
-	php_stream_puts(stream, "}\n\n");
+	php_stream_puts(stream, "<?php\n"
+		"\n"
+		"if (!extension_loaded('opkit')) {\n"
+		"    if (!@dl('opkit.so')) {\n"
+		"        trigger_error('OpKit extension not loaded', E_USER_ERROR);\n"
+		"    }\n"
+		"}\n"
+		"\n"
+		"opkit_load_multi([\n");
 
 	size_t base_dir_len = strlen(dir);
-	php_stream_puts(stream, "opkit_load_multi([\n");
 	opkit_collect_phpc_files(stream, dir, base_dir_len);
-	php_stream_puts(stream, "]);\n");
 
-	php_stream_puts(stream, "\nexit(opkit_boot());\n");
+	php_stream_puts(stream, "]);\n"
+		"\n"
+		"exit(opkit_boot());\n");
 
 	php_stream_close(stream);
 	efree(dir);
