@@ -11,10 +11,10 @@ PHP_ARG_ENABLE([opkit],
   [yes])
 
 if test "$PHP_OPKIT" != "no"; then
-  dnl Check PHP version (requires 8.2, 8.3, 8.4)
+  dnl Check PHP version (requires 8.2, 8.3, 8.4, 8.5)
   PHP_VERNUM=`$PHP_CONFIG --vernum`
-  if test "$PHP_VERNUM" -lt "80200" || test "$PHP_VERNUM" -ge "80500"; then
-    AC_MSG_ERROR([OpKit extension requires PHP 8.2, 8.3, 8.4. (Found PHP version: `$PHP_CONFIG --version`)])
+  if test "$PHP_VERNUM" -lt "80200" || test "$PHP_VERNUM" -ge "80600"; then
+    AC_MSG_ERROR([OpKit extension requires PHP 8.2, 8.3, 8.4, 8.5. (Found PHP version: `$PHP_CONFIG --version`)])
   fi
 
   dnl Always build as shared extension for Zend Extension compatibility

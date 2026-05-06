@@ -4,8 +4,8 @@
 
 ## 核心特性
 - [x] **常量支持**: 支持用户定义的持久化常量（包括 `define()` 和类常量）。
-- [x] **多版本兼容性**: 支持 PHP 8.2、8.3、8.4 版本，计划适配 PHP 8.5。
-- [ ] **🟡 OPcache 兼容**: 检测到 OPcache 已加载时，自动禁用 OPcache 或给出明确提示。
+- [x] **多版本兼容性**: 支持 PHP 8.2、8.3、8.4、8.5 版本。
+- [x] **🟡 PHP 8.5 OPcache 兼容**: 在 PHP 8.5 上实现深度 OPcache 集成——临时恢复原始 `compile_file` 绕过 OPcache 钩子，编译后恢复。
 - [ ] **🟢 JIT 优化支持**: 研究 OpKit 与 JIT 的集成方案。JIT 是运行时热点代码编译优化技术，需探索与 Zend OPcache JIT 的共存机制或实现独立的 JIT 编译器。
 
 ## 工具与易用性
@@ -39,18 +39,28 @@
 ## 高级 Phar 支持
 - [x] **归档优化**: 支持 Phar 压缩（GZip、BZip2）和数字签名。
 
-## 测试结果汇总 (2026-05-05)
+## 测试结果汇总 (2026-05-06)
 
 | PHP 版本 | 通过 | 跳过 | 失败 | 通过率 |
 |---------|------|------|------|--------|
-| PHP 8.2.30 | 21 | 2 | 0 | 100% |
-| PHP 8.3.30 | 21 | 2 | 0 | 100% |
-| PHP 8.4.19 | 22 | 1 | 0 | 100% |
+| PHP 8.2.30 | 22 | 3 | 0 | 100% |
+| PHP 8.3.30 | 22 | 3 | 0 | 100% |
+| PHP 8.4.19 | 23 | 2 | 0 | 100% |
+| PHP 8.5.4  | 24 | 1 | 0 | 100% |
 
 ### 新增测试文件
 - `tests/20_constants_comprehensive.phpt` - 全面常量测试
 - `tests/21_properties_comprehensive.phpt` - 全面属性测试
-- `tests/22_constants_properties_integration.phpt` - 集成测试 ✅ ✅ (已修复)
+- `tests/22_constants_properties_integration.phpt` - 集成测试
+- `tests/24_php85_fcc_const.phpt` - PHP 8.5 常量表达式中的第一类可调用对象测试
+
+### PHP 8.5 适配 (2026-05-06)
+- **深度 OPcache 集成**: 在 `opkit_compile_file()` 中临时保存并恢复 `zend_compile_file` 以绕过 OPcache 的 `persistent_compile_file` 钩子，编译完成后恢复。结构体定义（`zend_accel_directives`、`zend_accel_globals`、`zend_accel_shared_globals`）已更新至 8.5 格式。
+- **新增 AST 支持**: `ZEND_AST_OP_ARRAY`、`ZEND_AST_CALLABLE_CONVERT`、`zend_ast_is_decl()` 保护在四个阶段（persist/calc/serialize/unserialize）均已处理。
+- **新增 Opcode 支持**: `ZEND_DECLARE_ATTRIBUTED_CONST` + `ZEND_OP_DATA`（属性表持久化）。
+- **新增类型处理**: `IS_PTR`、`IS_INDIRECT`、`IS_OBJECT`、`IS_RESOURCE`、`IS_REFERENCE` 在所有 zval switch 中均已处理。
+- **新增属性字段**: `zend_attribute.validation_error` 支持。
+- **已知问题**: FCC（第一类可调用对象）常量在 `opkit_boot` 后存在轻微内存泄漏（2×344 字节），属于低优先级问题。
 
 ### 已知问题
 

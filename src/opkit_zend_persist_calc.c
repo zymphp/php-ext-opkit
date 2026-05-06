@@ -97,6 +97,17 @@ static void zend_persist_ast_calc(zend_ast *ast)
 				zend_persist_ast_calc(list->child[i]);
 			}
 		}
+#if PHP_VERSION_ID >= 80500
+	} else if (ast->kind == ZEND_AST_OP_ARRAY) {
+		ADD_SIZE(sizeof(zend_ast_op_array));
+		zval z;
+		ZVAL_PTR(&z, zend_ast_get_op_array(ast)->op_array);
+		zend_persist_op_array_calc(&z);
+	} else if (ast->kind == ZEND_AST_CALLABLE_CONVERT) {
+		ADD_SIZE(sizeof(zend_ast_fcc));
+	} else if (zend_ast_is_decl(ast)) {
+		ZEND_UNREACHABLE();
+#endif
 	} else {
 		uint32_t children = zend_ast_get_num_children(ast);
 		ADD_SIZE_MS(zend_ast_size(children));
@@ -155,6 +166,16 @@ static void zend_persist_zval_calc(zval *z)
 		}
 		break;
 	}
+	case IS_PTR:
+		break;
+	case IS_INDIRECT:
+		break;
+	case IS_OBJECT:
+		break;
+	case IS_RESOURCE:
+		break;
+	case IS_REFERENCE:
+		break;
 		default:
 			ZEND_ASSERT(Z_TYPE_P(z) < IS_STRING);
 			break;
@@ -175,6 +196,11 @@ static void zend_persist_attributes_calc(HashTable *attributes)
 			ADD_SIZE_MS(ZEND_ATTRIBUTE_SIZE(attr->argc));
 			ADD_INTERNED_STRING(attr->name);
 			ADD_INTERNED_STRING(attr->lcname);
+#if PHP_VERSION_ID >= 80500
+			if (attr->validation_error != NULL) {
+				ADD_INTERNED_STRING(attr->validation_error);
+			}
+#endif
 
 			for (i = 0; i < attr->argc; i++) {
 				if (attr->args[i].name) {
@@ -193,7 +219,11 @@ static void zend_persist_type_calc(zend_type *type)
 	}
 
 	zend_type *single_type;
+#if PHP_VERSION_ID >= 80500
+	ZEND_TYPE_FOREACH_MUTABLE(*type, single_type) {
+#else
 	ZEND_TYPE_FOREACH(*type, single_type) {
+#endif
 		if (ZEND_TYPE_HAS_LIST(*single_type)) {
 			zend_persist_type_calc(single_type);
 			continue;
@@ -262,6 +292,23 @@ static void zend_persist_op_array_calc_ex(zend_op_array *op_array)
 
 	zend_shared_alloc_register_xlat_entry(op_array->opcodes, op_array->opcodes);
 	ADD_SIZE_CD(sizeof(zend_op) * op_array->last);
+
+#if PHP_VERSION_ID >= 80500
+	if ((op_array->fn_flags & ZEND_ACC_PTR_OPS) && !op_array->function_name) {
+		zend_op *op = op_array->opcodes;
+		zend_op *end = op + op_array->last;
+		while (op < end) {
+			if (op->opcode == ZEND_DECLARE_ATTRIBUTED_CONST) {
+				zval *literal = RT_CONSTANT(op+1, (op+1)->op1);
+				if (Z_TYPE_P(literal) == IS_PTR && Z_PTR_P(literal) != NULL) {
+					HashTable *attributes = Z_PTR_P(literal);
+					zend_persist_attributes_calc(attributes);
+				}
+			}
+			op++;
+		}
+	}
+#endif
 
 	if (op_array->filename) {
 		ADD_STRING(op_array->filename);

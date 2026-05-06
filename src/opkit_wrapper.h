@@ -37,6 +37,16 @@
 # define CONST_OWNED_BY_PERSISTENT_SCRIPT (1<<4)
 #endif
 
+/* --- PHP 8.5 Compiler Flag Compatibility --- */
+#if PHP_VERSION_ID >= 80500
+#ifndef ZEND_ACC_PTR_OPS
+# define ZEND_ACC_PTR_OPS (1 << 28)
+#endif
+#ifndef ZEND_ACC_NODISCARD
+# define ZEND_ACC_NODISCARD (1 << 29)
+#endif
+#endif
+
 /* --- PHP 8.4 Property Hooks Compatibility --- */
 #if PHP_VERSION_ID >= 80400
 #ifndef ZEND_PROPERTY_HOOK_COUNT
@@ -112,6 +122,9 @@
 #define SUCCESSFULLY_REATTACHED 4
 #define ALLOC_FAIL_MAPPING      8
 #define ALLOC_FALLBACK          9
+#if PHP_VERSION_ID >= 80500
+#define NO_SHM_BACKEND          10
+#endif
 
 typedef struct _zend_shared_segment {
     size_t  size;
@@ -501,6 +514,9 @@ typedef struct _zend_accel_directives {
 	char          *lockfile_path;
 #endif
 	char          *file_cache;
+#if PHP_VERSION_ID >= 80500
+	bool      file_cache_read_only;
+#endif
 	bool      file_cache_only;
 	bool      file_cache_consistency_checks;
 #if ENABLE_FILE_CACHE_FALLBACK
@@ -540,15 +556,24 @@ typedef struct _zend_accel_globals {
 #ifndef ZEND_WIN32
 	zend_ulong              root_hash;
 #endif
+#if PHP_VERSION_ID >= 80500
+	void                   *preloaded_internal_run_time_cache;
+	size_t                  preloaded_internal_run_time_cache_size;
+	bool                    preloading;
+#endif
 	/* preallocated shared-memory block to save current script */
 	void                   *mem;
 	zend_persistent_script *current_persistent_script;
 	/* cache to save hash lookup on the same INCLUDE opcode */
 	const zend_op          *cache_opline;
 	zend_persistent_script *cache_persistent_script;
+#if PHP_VERSION_ID >= 80500
+	zend_string            *key;
+#else
 	/* preallocated buffer for keys */
 	zend_string             key;
 	char                    _key[MAXPATHLEN * 8];
+#endif
 } zend_accel_globals;
 
 typedef struct _zend_string_table {
@@ -559,6 +584,12 @@ typedef struct _zend_string_table {
 	zend_string *end;
 	zend_string *saved_top;
 } zend_string_table;
+
+#if PHP_VERSION_ID >= 80500
+typedef uint32_t zend_string_table_pos_t;
+# define ZEND_STRING_TABLE_POS_MAX UINT32_MAX
+# define ZEND_STRING_TABLE_POS_ALIGNMENT 8
+#endif
 
 typedef struct _zend_accel_shared_globals {
 	/* Cache Data Structures */
@@ -571,6 +602,9 @@ typedef struct _zend_accel_shared_globals {
 	zend_accel_hash hash;             /* hash table for cached scripts */
 
 	size_t map_ptr_last;
+#if PHP_VERSION_ID >= 80500
+	size_t map_ptr_static_last;
+#endif
 
 	/* Directives & Maintenance */
 	time_t          start_time;
@@ -692,7 +726,10 @@ END_EXTERN_C()
 /* --- OpKit Wrapper Logic --- */
 
 #undef ZCG
-#ifdef ZTS
+#if PHP_VERSION_ID >= 80500 && defined(ZTS)
+# define ZCG(v) ZEND_TSRMG_FAST(accel_globals_offset, zend_accel_globals *, v)
+extern size_t accel_globals_offset;
+#elif defined(ZTS)
 # define ZCG(v) ZEND_TSRMG(accel_globals_id, zend_accel_globals *, v)
 #else
 # define ZCG(v) (accel_globals.v)

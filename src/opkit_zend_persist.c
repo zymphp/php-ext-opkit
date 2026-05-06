@@ -171,6 +171,20 @@ static zend_ast *zend_persist_ast(zend_ast *ast)
 			}
 		}
 		ast = (zend_ast *)copy;
+#if PHP_VERSION_ID >= 80500
+	} else if (ast->kind == ZEND_AST_OP_ARRAY) {
+		zend_ast_op_array *copy = zend_shared_memdup(ast, sizeof(zend_ast_op_array));
+		zval z;
+		ZVAL_PTR(&z, copy->op_array);
+		zend_persist_op_array(&z);
+		copy->op_array = Z_PTR(z);
+		ast = (zend_ast *) copy;
+	} else if (ast->kind == ZEND_AST_CALLABLE_CONVERT) {
+		zend_ast_fcc *copy = zend_shared_memdup(ast, sizeof(zend_ast_fcc));
+		ast = (zend_ast *) copy;
+	} else if (zend_ast_is_decl(ast)) {
+		ZEND_UNREACHABLE();
+#endif
 	} else {
 		uint32_t children = zend_ast_get_num_children(ast);
 		zend_ast *copy = zend_shared_memdup_put_free(ast, sizeof(zend_ast) + sizeof(zend_ast *) * (children - 1));
@@ -250,6 +264,10 @@ static void zend_persist_zval(zval *z)
 				Z_TYPE_FLAGS_P(z) = 0;
 			}
 			break;
+#if PHP_VERSION_ID >= 80500
+	case IS_PTR:
+		break;
+#endif
 	default:
 		/* IS_UNDEF, IS_NULL, IS_FALSE, IS_TRUE, IS_LONG, IS_DOUBLE, IS_RESOURCE */
 		break;
@@ -274,6 +292,11 @@ static HashTable *zend_persist_attributes(HashTable *attributes)
 
 		zend_accel_store_interned_string(copy->name);
 		zend_accel_store_interned_string(copy->lcname);
+#if PHP_VERSION_ID >= 80500
+		if (copy->validation_error) {
+			zend_accel_store_interned_string(copy->validation_error);
+		}
+#endif
 
 		for (i = 0; i < copy->argc; i++) {
 			if (copy->args[i].name) {
@@ -386,6 +409,21 @@ static void zend_persist_op_array_ex(zend_op_array *op_array, zend_persistent_sc
 			}
 			if (opline->op2_type == IS_CONST) {
 				opline->op2.zv = (zval*)((char*)opline->op2.zv + ((char*)new_opcodes - (char*)op_array->opcodes));
+			}
+		}
+#endif
+#if PHP_VERSION_ID >= 80500
+		{
+			for (uint32_t i = 0; i < op_array->last; i++) {
+				zend_op *opline = &new_opcodes[i];
+				if (opline->opcode == ZEND_OP_DATA && (opline-1)->opcode == ZEND_DECLARE_ATTRIBUTED_CONST) {
+					zval *literal = RT_CONSTANT(opline, opline->op1);
+					if (Z_TYPE_P(literal) == IS_PTR && Z_PTR_P(literal) != NULL) {
+						HashTable *attributes = Z_PTR_P(literal);
+						attributes = zend_persist_attributes(attributes);
+						ZVAL_PTR(literal, attributes);
+					}
+				}
 			}
 		}
 #endif

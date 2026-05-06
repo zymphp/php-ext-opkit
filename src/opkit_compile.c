@@ -195,6 +195,10 @@ static void zend_file_cache_serialize_hash(HashTable *ht, zend_persistent_script
 	}
 }
 
+#if PHP_VERSION_ID >= 80500
+static void zend_file_cache_serialize_func(zval *zv, zend_persistent_script *script, zend_file_cache_metainfo *info, void *buf);
+#endif
+
 static void zend_file_cache_serialize_ast(zend_ast *ast, zend_persistent_script *script, zend_file_cache_metainfo *info, void *buf)
 {
 	uint32_t i;
@@ -212,6 +216,18 @@ static void zend_file_cache_serialize_ast(zend_ast *ast, zend_persistent_script 
 				zend_file_cache_serialize_ast(tmp, script, info, buf);
 			}
 		}
+#if PHP_VERSION_ID >= 80500
+	} else if (ast->kind == ZEND_AST_OP_ARRAY) {
+		zval z;
+		ZVAL_PTR(&z, zend_ast_get_op_array(ast)->op_array);
+		zend_file_cache_serialize_func(&z, script, info, buf);
+		zend_ast_get_op_array(ast)->op_array = Z_PTR(z);
+	} else if (ast->kind == ZEND_AST_CALLABLE_CONVERT) {
+		zend_ast_fcc *fcc = (zend_ast_fcc*)ast;
+		ZEND_MAP_PTR_INIT(fcc->fptr, NULL);
+	} else if (zend_ast_is_decl(ast)) {
+		ZEND_UNREACHABLE();
+#endif
 	} else {
 		uint32_t children = zend_ast_get_num_children(ast);
 		for (i = 0; i < children; i++) {
@@ -249,6 +265,11 @@ static void zend_file_cache_serialize_zval(zval *zv, zend_persistent_script *scr
 				zend_file_cache_serialize_ast(GC_AST(ast_ref), script, info, buf);
 			}
 			break;
+#if PHP_VERSION_ID >= 80500
+		case IS_PTR:
+			/* Used by attributes on constants, will be handled separately */
+			break;
+#endif
 	}
 }
 
@@ -263,6 +284,9 @@ static void zend_file_cache_serialize_attribute(zval *zv, zend_persistent_script
 
 	SERIALIZE_STR(attr->name);
 	SERIALIZE_STR(attr->lcname);
+#if PHP_VERSION_ID >= 80500
+	SERIALIZE_STR(attr->validation_error);
+#endif
 	for (i = 0; i < attr->argc; i++) {
 		SERIALIZE_STR(attr->args[i].name);
 		zend_file_cache_serialize_zval(&attr->args[i].value, script, info, buf);
@@ -348,6 +372,14 @@ static void zend_file_cache_serialize_op_array(zend_op_array *op_array, zend_per
 							SERIALIZE_PTR(opline->op2.jmp_addr);
 						}
 						break;
+				}
+#endif
+#if PHP_VERSION_ID >= 80500
+				if (opline->opcode == ZEND_OP_DATA
+					&& (opline-1)->opcode == ZEND_DECLARE_ATTRIBUTED_CONST
+				) {
+					zval *literal = RT_CONSTANT(opline, opline->op1);
+					SERIALIZE_ATTRIBUTES(Z_PTR_P(literal));
 				}
 #endif
 				zend_serialize_opcode_handler(opline);
@@ -778,6 +810,18 @@ static void zend_file_cache_unserialize_ast(zend_ast *ast, zend_persistent_scrip
 				zend_file_cache_unserialize_ast(list->child[i], script, buf);
 			}
 		}
+#if PHP_VERSION_ID >= 80500
+	} else if (ast->kind == ZEND_AST_OP_ARRAY) {
+		zval z;
+		ZVAL_PTR(&z, zend_ast_get_op_array(ast)->op_array);
+		zend_file_cache_unserialize_func(&z, script, buf);
+		zend_ast_get_op_array(ast)->op_array = Z_PTR(z);
+	} else if (ast->kind == ZEND_AST_CALLABLE_CONVERT) {
+		zend_ast_fcc *fcc = (zend_ast_fcc*)ast;
+		ZEND_MAP_PTR_NEW(fcc->fptr);
+	} else if (zend_ast_is_decl(ast)) {
+		ZEND_UNREACHABLE();
+#endif
 	} else {
 		uint32_t children = zend_ast_get_num_children(ast);
 		for (i = 0; i < children; i++) {
@@ -854,6 +898,11 @@ static void zend_file_cache_unserialize_zval(zval *zv, zend_persistent_script *s
 				zend_file_cache_unserialize_ast(GC_AST(ast_ref), script, buf);
 			}
 			break;
+#if PHP_VERSION_ID >= 80500
+		case IS_PTR:
+			/* Used by attributes on constants, will be handled separately */
+			break;
+#endif
 		case IS_INDIRECT:
 			UNSERIALIZE_PTR(Z_INDIRECT_P(zv));
 			break;
@@ -870,6 +919,9 @@ static void zend_file_cache_unserialize_attribute(zval *zv, zend_persistent_scri
 		attr = Z_PTR_P(zv);
 		UNSERIALIZE_STR(attr->name);
 		UNSERIALIZE_STR(attr->lcname);
+#if PHP_VERSION_ID >= 80500
+		UNSERIALIZE_STR(attr->validation_error);
+#endif
 		for (i = 0; i < attr->argc; i++) {
 			UNSERIALIZE_STR(attr->args[i].name);
 			zend_file_cache_unserialize_zval(&attr->args[i].value, script, buf);
@@ -986,6 +1038,14 @@ static void zend_file_cache_unserialize_op_array(zend_op_array *op_array, zend_p
 						UNSERIALIZE_PTR(opline->op2.jmp_addr);
 					}
 					break;
+			}
+#endif
+#if PHP_VERSION_ID >= 80500
+			if (opline->opcode == ZEND_OP_DATA
+				&& (opline-1)->opcode == ZEND_DECLARE_ATTRIBUTED_CONST
+			) {
+				zval *literal = RT_CONSTANT(opline, opline->op1);
+				UNSERIALIZE_ATTRIBUTES(Z_PTR_P(literal));
 			}
 #endif
 			zend_deserialize_opcode_handler(opline);
@@ -1538,7 +1598,22 @@ zend_persistent_script *opkit_compile_file(zend_file_handle *file_handle, int ty
 		CG(compiler_options) |= ZEND_COMPILE_WITH_FILE_CACHE;
 		CG(compiler_options) |= ZEND_COMPILE_IGNORE_OTHER_FILES;
 
+#if PHP_VERSION_ID >= 80500
+		/* Save OPcache's zend_compile_file hook and restore original compiler.
+		 * In PHP 8.5, OPcache is always loaded and has hooked zend_compile_file
+		 * with persistent_compile_file. We temporarily restore the raw compiler
+		 * so we get an uncompromised op_array for our own persistence. */
+		extern zend_op_array *compile_file(zend_file_handle*, int);
+		zend_op_array *(*saved_compile_file)(zend_file_handle*, int) = zend_compile_file;
+		zend_compile_file = compile_file;
+#endif
+
 		op_array = *op_array_p = zend_compile_file(file_handle, type);
+
+#if PHP_VERSION_ID >= 80500
+		/* Restore OPcache's compile hook */
+		zend_compile_file = saved_compile_file;
+#endif
 
 		/* Register file-level const declarations from ZEND_DECLARE_CONST opcodes
 		 * into EG(zend_constants) so pass_two() and zend_accel_move_user_constants()
