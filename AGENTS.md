@@ -49,8 +49,7 @@ OpKit previously used `ZEND_COMPILE_NO_CONSTANT_SUBSTITUTION` (matching OPcache)
 ## Loading the Extension
 
 - **Must** be loaded as `zend_extension=opkit.so` — NOT `extension=opkit.so`.
-- **PHP 8.2–8.4**: Mutually exclusive with Zend OPcache. Both cannot be loaded simultaneously.
-- **PHP 8.5**: Uses deep OPcache integration — temporarily restores the original `compile_file` during compilation, then restores OPcache's hook. Coexists with always-built-in OPcache.
+- **All PHP versions (8.2–8.5)**: Coexists with OPcache via deep integration. OpKit temporarily restores the original `compile_file` during compilation, then restores OPcache's hook.
 - Set `phar.readonly=Off` when creating Phar archives.
 - A pre-built php-dev.ini exists at `tmp/php-dev.ini`.
 

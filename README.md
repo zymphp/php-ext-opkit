@@ -30,7 +30,7 @@ OpKit (Opcode Toolkit) 是一个处于 **实验阶段** 的 PHP Opcode 预编译
 
 - **PHP 版本**: 支持 PHP 8.2、8.3、8.4 和 8.5。
 - **构建工具**: 需要安装 `phpize`、`php-config`、`make` 以及 C 编译器（如 `gcc`）。
-- **运行依赖**: OpKit 必须作为 **Zend Extension** 加载。在 PHP 8.2–8.4 上与 `Zend OPcache` 互斥；PHP 8.5 上已实现深度集成，可与内置 OPcache 共存。
+- **运行依赖**: OpKit 必须作为 **Zend Extension** 加载。通过深度集成可与 Zend OPcache 静默共存。
 
 ---
 
@@ -52,7 +52,7 @@ OpKit 必须作为 **Zend Extension** 加载。在 `php.ini` 中添加：
 zend_extension=opkit.so
 ```
 
-> **⚠️ 注意**：在 PHP 8.2–8.4 上，OpKit 与 `Zend OPcache` 存在底层机制冲突，**两者不能同时开启**。在 PHP 8.5 上，OpKit 通过深度集成机制可与内置 OPcache 共存。
+> **⚠️ 注意**：OpKit 通过深度集成可与 Zend OPcache 静默共存。
 
 ---
 

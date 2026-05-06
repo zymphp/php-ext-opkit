@@ -1716,17 +1716,6 @@ static ZEND_MINIT_FUNCTION(opkit)
 {
 	(void)type; /* keep the compiler happy */
 
-#if PHP_VERSION_ID >= 80500
-	/* In PHP 8.5, OPcache is always loaded into the PHP binary.
-	 * OpKit coexists by temporarily restoring the original compile_file
-	 * function pointer during compilation, then restoring OPcache's hook. */
-#else
-	if (zend_get_extension("Zend OPcache")) {
-		zend_error(E_CORE_ERROR, OPKIT_EXTENSION_NAME " is incompatible with Zend OPcache");
-		return FAILURE;
-	}
-#endif
-
 	REGISTER_INI_ENTRIES();
 
 	return SUCCESS;

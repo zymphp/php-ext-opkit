@@ -1598,22 +1598,19 @@ zend_persistent_script *opkit_compile_file(zend_file_handle *file_handle, int ty
 		CG(compiler_options) |= ZEND_COMPILE_WITH_FILE_CACHE;
 		CG(compiler_options) |= ZEND_COMPILE_IGNORE_OTHER_FILES;
 
-#if PHP_VERSION_ID >= 80500
 		/* Save OPcache's zend_compile_file hook and restore original compiler.
-		 * In PHP 8.5, OPcache is always loaded and has hooked zend_compile_file
-		 * with persistent_compile_file. We temporarily restore the raw compiler
-		 * so we get an uncompromised op_array for our own persistence. */
+		 * If OPcache is loaded, it has hooked zend_compile_file with
+		 * persistent_compile_file. We temporarily restore the raw compiler
+		 * so we get an uncompromised op_array for our own persistence.
+		 * If OPcache is not loaded, this is a harmless no-op. */
 		extern zend_op_array *compile_file(zend_file_handle*, int);
 		zend_op_array *(*saved_compile_file)(zend_file_handle*, int) = zend_compile_file;
 		zend_compile_file = compile_file;
-#endif
 
 		op_array = *op_array_p = zend_compile_file(file_handle, type);
 
-#if PHP_VERSION_ID >= 80500
-		/* Restore OPcache's compile hook */
+		/* Restore OPcache's compile hook (or original, if no hook). */
 		zend_compile_file = saved_compile_file;
-#endif
 
 		/* Register file-level const declarations from ZEND_DECLARE_CONST opcodes
 		 * into EG(zend_constants) so pass_two() and zend_accel_move_user_constants()
