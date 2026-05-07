@@ -470,6 +470,7 @@ make
 | `22_constants_properties_integration.phpt` | 集成测试 | 继承/抽象类/常量默认值 |
 | `23_is_loaded.phpt` | 加载检测 | opkit_is_loaded |
 | `24_php85_fcc_const.phpt` | PHP 8.5 FCC 常量 | 第一类可调用对象 |
+| `25_property_type_info.phpt` | 属性类型元数据 | opkit_get_info 类型提取 |
 
 ### 11.2 测试格式
 

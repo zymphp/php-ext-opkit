@@ -888,6 +888,17 @@ ZEND_FUNCTION(opkit_get_info)
 											array_init(&prop_info);
 											add_assoc_stringl(&prop_info, "name", pname, plen);
 											add_assoc_long(&prop_info, "flags", prop->flags);
+
+											/* Extract property type */
+											smart_str type_str = {0};
+											opkit_get_type_name(&type_str, prop->type, buf, info.mem_size, total_size);
+											if (type_str.s && ZSTR_LEN(type_str.s) > 0) {
+												add_assoc_stringl(&prop_info, "type", ZSTR_VAL(type_str.s), ZSTR_LEN(type_str.s));
+											}
+											if (type_str.s) {
+												smart_str_free(&type_str);
+											}
+
 											add_next_index_zval(&props, &prop_info);
 										}
 									}

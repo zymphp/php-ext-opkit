@@ -744,14 +744,16 @@ function generateStubContent($info) {
                     foreach ($class['properties'] as $prop) {
                         $pname = is_array($prop) ? $prop['name'] : $prop;
                         $pflags = is_array($prop) ? ($prop['flags'] ?? $ZEND_ACC_PUBLIC) : $ZEND_ACC_PUBLIC;
+                        $ptype = is_array($prop) ? ($prop['type'] ?? null) : null;
 
                         $prefix = "";
-                        if ($pflags & $ZEND_ACC_STATIC) $prefix .= "static ";
                         if ($pflags & $ZEND_ACC_PRIVATE) $prefix .= "private ";
                         elseif ($pflags & $ZEND_ACC_PROTECTED) $prefix .= "protected ";
                         else $prefix .= "public ";
+                        if ($pflags & $ZEND_ACC_STATIC) $prefix .= "static ";
 
-                        $out .= $indent . "    $prefix$$pname;\n";
+                        $type_str = $ptype ? "$ptype " : "";
+                        $out .= $indent . "    $prefix$type_str\$$pname;\n";
                     }
                 }
                 if (!empty($class['methods'])) {
@@ -854,7 +856,20 @@ function showInfo($file) {
                     if (!empty($class['properties'])) {
                         foreach ($class['properties'] as $prop) {
                             $pname = is_array($prop) ? $prop['name'] : $prop;
-                            echo "      * Property: $$pname\n";
+                            $ptype = is_array($prop) ? ($prop['type'] ?? null) : null;
+                            $pflags = is_array($prop) ? ($prop['flags'] ?? 0x01) : 0x01;
+
+                            $prefix = "";
+                            if ($pflags & 0x04) $prefix .= "private ";
+                            elseif ($pflags & 0x02) $prefix .= "protected ";
+                            else $prefix .= "public ";
+                            if ($pflags & 0x10) $prefix .= "static ";
+
+                            if ($ptype) {
+                                echo "      * Property: $prefix$ptype \$$pname\n";
+                            } else {
+                                echo "      * Property: $prefix\$$pname\n";
+                            }
                         }
                     }
                     if (!empty($class['methods'])) {

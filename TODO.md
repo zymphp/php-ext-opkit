@@ -13,7 +13,7 @@
 - [x] **🟡 phpc 配置增强**: 支持多路径配置（数组形式）、通配符匹配（如 `src/*/Controller.php`）及 `exclude` 忽略路径配置。
 - [x] **增量编译**: 基于源码修改时间、System ID 和 Magic 值的智能增量编译。
 - [x] **交互式信息查看**: 增强 `phpc -i` 以支持列出详细的方法签名和类属性。
-  - [ ] **🟡 显示类属性的完整类型信息**（如 `public string $name`）
+  - [x] **🟡 显示类属性的完整类型信息**（如 `public string $name`）
 - [x] **Composer 支持**: 提供 Composer 插件，支持自动编译及扩展的编译安装。
 
 ## 测试与质量
