@@ -85,25 +85,11 @@ php -d zend_extension=opkit.so dist/entry.php
 | **基础编译** | `phpc -s src/ -o dist/` |
 | **使用配置** | `phpc -c opkit.json` |
 | **强制重编** | `phpc -s src/ -o dist/ -f` |
-| **静态分析** | `phpc analyze <dir|file>` |
+| **静态分析** | `phpc analyze <dir\|file>` |
 | **打包 Phar** | `phpc -s src/ -o dist/ -p app.phar` |
 | **查看详情** | `phpc -i dist/User.phpc` |
 
-### 参数详情
-
-- `-s, --src <dir|file>`: 源码路径。
-- `-o, --output <dir>`: 编译产物存放目录。
-- `-c, --config <file>`: 指定 JSON 配置文件（默认寻找当前目录下的 `opkit.json`）。
-- `-p, --phar <name>`: 编译完成后自动将产物打包为 Phar 归档。
-- `-z, --compress <gz|bz2|none>`: 指定 Phar 归档的压缩方式（默认 `none`）。
-- `--sign <sha1|sha256|sha512|openssl>`: 指定 Phar 归档的数字签名算法（默认 `sha1`）。
-- `--sign-key <file>`: 指定 OpenSSL 签名所需的私钥文件路径。
-- `-e, --entry <path>`: 指定生成的引导入口文件名（默认 `entry.php`）。
-- `-f, --force`: 禁用增量模式，强制重新编译所有文件。
-- `--no-incremental`: 显式禁用增量编译模式。
-- `-a, --analyze <dir|file>`: 对 `.phpc` 文件执行静态分析，汇总符号表（函数、类、常量）并检查跨文件的符号定义冲突。
-- `--stubs <dir>`: 为编译产物生成对应的 PHP 定义存根（Stubs），解决二进制文件无法被静态分析工具（如 PHPStan, Psalm, IDE）识别的问题。
-- `-i, --info <file>`: 交互式查看 `.phpc` 文件的符号表、函数签名、类属性及内存逻辑分区统计。
+> 📖 **完整使用说明**：请参阅 [`PHPC_MANUAL.md`](PHPC_MANUAL.md)，包含增量编译、多源路径、glob 通配符、Phar 压缩签名、静态分析、Stub 生成等详细用法。
 
 ---
 

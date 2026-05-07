@@ -85,25 +85,11 @@ php -d zend_extension=opkit.so dist/entry.php
 | **Basic Compilation** | `phpc -s src/ -o dist/` |
 | **Using Config** | `phpc -c opkit.json` |
 | **Force Recompile** | `phpc -s src/ -o dist/ -f` |
-| **Static Analysis** | `phpc analyze <dir|file>` |
+| **Static Analysis** | `phpc analyze <dir\|file>` |
 | **Package Phar** | `phpc -s src/ -o dist/ -p app.phar` |
 | **View Details** | `phpc -i dist/User.phpc` |
 
-### Parameter Details
-
-- `-s, --src <dir|file>`: Source path.
-- `-o, --output <dir>`: Target output directory.
-- `-c, --config <file>`: Specify JSON configuration file (defaults to `opkit.json` in the current directory).
-- `-p, --phar <name>`: Automatically package products into a Phar archive after compilation.
-- `-z, --compress <gz|bz2|none>`: Specify Phar compression format (default `none`).
-- `--sign <sha1|sha256|sha512|openssl>`: Specify Phar digital signature algorithm (default `sha1`).
-- `--sign-key <file>`: Specify the private key file path for OpenSSL signature.
-- `-e, --entry <path>`: Specify the filename of the generated bootstrap entry (default `entry.php`).
-- `-f, --force`: Disable incremental mode and force recompile all files.
-- `--no-incremental`: Explicitly disable incremental compilation mode.
-- `-a, --analyze <dir|file>`: Perform static analysis on compiled `.phpc` files, summarizing symbol tables (functions, classes, constants) and checking for definition conflicts across files.
-- `--stubs <dir>`: Generate PHP stubs for compilation products, solving the issue of binary files not being recognized by static analysis tools (e.g., PHPStan, Psalm, IDEs).
-- `-i, --info <file>`: Interactively view symbol tables, function signatures, class attributes, and memory logical partition statistics of a `.phpc` file.
+> 📖 **Full manual**: Please refer to [`PHPC_MANUAL.md`](PHPC_MANUAL.md) for incremental compilation, multi-source paths, glob wildcards, Phar compression & signing, static analysis, stub generation, and more.
 
 ---
 

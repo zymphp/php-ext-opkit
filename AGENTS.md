@@ -11,7 +11,7 @@ php-src/php-8.5.4/scripts/phpize && \
 make
 ```
 
-`config.m4` requires PHP 8.2–8.5. PHP 8.6+ is not yet supported.
+`config.m4` requires PHP 8.2–8.5.
 The extension is always shared; `--enable-debug` is supported for ZEND_DEBUG builds.
 
 ## Test
