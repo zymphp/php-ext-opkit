@@ -27,8 +27,11 @@
 ### 前提条件
 
 - PHP 8.2 - 8.5
-- OpKit 扩展已作为 `zend_extension` 加载
-- `phar.readonly=Off`（如需打包 Phar）
+- `phpc` 工具已安装到系统 PATH
+- OpKit 扩展已通过 `php.ini` 作为 `zend_extension` 加载
+- `phar.readonly=Off` 已在 `php.ini` 中配置（如需打包 Phar）
+
+> 本文档所有命令均假设以上环境已就绪，因此不再在命令行中显式指定 `-d zend_extension=` 或 `-d phar.readonly=`。若未通过 `php.ini` 配置，请在命令前追加对应参数。
 
 ### 最简编译示例
 
@@ -48,7 +51,7 @@ dist/
 ### 运行编译结果
 
 ```bash
-php -d zend_extension=modules/opkit.so dist/entry.php
+php dist/entry.php
 ```
 
 ---
@@ -461,7 +464,7 @@ phpc -s src/ -o dist/ -p app.phar
 ### 运行 Phar
 
 ```bash
-php -d zend_extension=modules/opkit.so app.phar
+php app.phar
 ```
 
 ### 压缩
@@ -633,18 +636,17 @@ phpc -s src/ -o dist/
 phpc -i dist/main.phpc
 
 # 3. 运行测试
-php -d zend_extension=modules/opkit.so dist/entry.php
+php dist/entry.php
 ```
 
 ### 发布阶段
 
 ```bash
 # 编译 + 生成 stubs + 打包 Phar
-php -d zend_extension=modules/opkit.so -d phar.readonly=Off \
-  ./bin/phpc -s src/ -o dist/ -p app.phar -z gz --sign sha256 --stubs stubs/
+phpc -s src/ -o dist/ -p app.phar -z gz --sign sha256 --stubs stubs/
 
 # 运行 Phar
-php -d zend_extension=modules/opkit.so app.phar
+php app.phar
 ```
 
 ---

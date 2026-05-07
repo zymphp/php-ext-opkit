@@ -27,8 +27,11 @@
 ### Prerequisites
 
 - PHP 8.2 - 8.5
-- OpKit extension loaded as `zend_extension`
-- `phar.readonly=Off` (if Phar packaging is needed)
+- `phpc` tool installed in the system PATH
+- OpKit extension loaded via `php.ini` as `zend_extension`
+- `phar.readonly=Off` configured in `php.ini` (if Phar packaging is needed)
+
+> All commands in this document assume the above environment is ready, so `-d zend_extension=` or `-d phar.readonly=` are not explicitly shown. If not configured via `php.ini`, prepend the corresponding flags to the commands.
 
 ### Simplest Compilation Example
 
@@ -48,7 +51,7 @@ dist/
 ### Running the Compiled Result
 
 ```bash
-php -d zend_extension=modules/opkit.so dist/entry.php
+php dist/entry.php
 ```
 
 ---
@@ -461,7 +464,7 @@ When packaging, `entry.php` is automatically included in the Phar (auto-generate
 ### Running the Phar
 
 ```bash
-php -d zend_extension=modules/opkit.so app.phar
+php app.phar
 ```
 
 ### Compression
@@ -633,18 +636,27 @@ phpc -s src/ -o dist/
 phpc -i dist/main.phpc
 
 # 3. Run tests
-php -d zend_extension=modules/opkit.so dist/entry.php
+php dist/entry.php
 ```
 
 ### Release Phase
 
 ```bash
 # Compile + generate stubs + package Phar
-php -d zend_extension=modules/opkit.so -d phar.readonly=Off \
-  ./bin/phpc -s src/ -o dist/ -p app.phar -z gz --sign sha256 --stubs stubs/
+phpc -s src/ -o dist/ -p app.phar -z gz --sign sha256 --stubs stubs/
 
 # Run the Phar
-php -d zend_extension=modules/opkit.so app.phar
+php app.phar
+```
+
+### Release Phase
+
+```bash
+# Compile + generate stubs + package Phar
+phpc -s src/ -o dist/ -p app.phar -z gz --sign sha256 --stubs stubs/
+
+# Run the Phar
+php app.phar
 ```
 
 ---
