@@ -62,15 +62,13 @@
 - **新增属性字段**: `zend_attribute.validation_error` 支持。
 - **已知问题**: FCC（第一类可调用对象）常量在 `opkit_boot` 后存在轻微内存泄漏（2×344 字节），属于低优先级问题。
 
-### 已知问题
-
-**🟡 嵌套数组常量未完全序列化 (Test 20)**
-- 测试文件: `20_constants_comprehensive.phpt`
-- 问题: 嵌套数组常量 `['key' => [1,2,3]]` 的内部数组在序列化时发生字符串转换 (`Array`)
-- 影响: PHP 8.2/8.3/8.4 输出有差异，但不影响简单/标量数组常量
-- 根因: 嵌套数组的持久化路径不完整，需在实现完整的递归持久化
-
 ### 已修复 (2026-05-05)
+
+**✅ 嵌套数组常量序列化 (Test 20)**
+- 测试文件: `20_constants_comprehensive.phpt`
+- 原始问题: 嵌套数组常量 `['key' => [1,2,3]]` 的内部数组在序列化时发生字符串转换 (`Array`)
+- 根因: 嵌套数组的持久化路径不完整
+- 修复: `zend_persist_zval` 中对 `IS_ARRAY` 类型已实现完整的递归持久化（通过 `zend_hash_persist` 和 `zend_persist_zval` 递归处理数组元素）。测试 20 和 22 在 PHP 8.2/8.3/8.4/8.5 下均通过。
 
 **✅ IS_CONSTANT_AST 内存泄漏 (原 Test 22 崩溃)**
 - 测试文件: `22_constants_properties_integration.phpt`
