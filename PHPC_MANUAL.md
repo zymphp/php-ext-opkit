@@ -33,7 +33,7 @@
 ### 最简编译示例
 
 ```bash
-php -d zend_extension=modules/opkit.so ./bin/phpc -s src/ -o dist/
+phpc -s src/ -o dist/
 ```
 
 编译后会在 `dist/` 目录下生成对应的 `.phpc` 文件和 `entry.php` 入口文件：
@@ -58,7 +58,7 @@ php -d zend_extension=modules/opkit.so dist/entry.php
 ### 编译单个文件
 
 ```bash
-php phpc -s index.php -o output/
+phpc -s index.php -o output/
 ```
 
 输出：`output/index.phpc`、`output/entry.php`
@@ -66,7 +66,7 @@ php phpc -s index.php -o output/
 ### 编译整个目录（递归）
 
 ```bash
-php phpc -s src/ -o dist/
+phpc -s src/ -o dist/
 ```
 
 自动递归编译 `src/` 下所有 `.php` 文件，保持目录结构输出到 `dist/`。
@@ -74,7 +74,7 @@ php phpc -s src/ -o dist/
 ### 使用长参数
 
 ```bash
-php phpc --src src/ --output dist/
+phpc --src src/ --output dist/
 ```
 
 ---
@@ -84,7 +84,7 @@ php phpc --src src/ --output dist/
 ### 1. 仅编译
 
 ```bash
-php phpc -s src/ -o dist/
+phpc -s src/ -o dist/
 ```
 
 ### 2. 编译 + 自动生成 entry.php
@@ -103,7 +103,7 @@ exit(opkit_boot());
 ### 3. 仅生成 entry.php（不编译）
 
 ```bash
-php phpc -e dist/entry.php -o dist/
+phpc -e dist/entry.php -o dist/
 ```
 
 根据输出目录中已有的 `.phpc` 文件生成入口文件。
@@ -111,7 +111,7 @@ php phpc -e dist/entry.php -o dist/
 ### 4. 编译 + Phar 打包一体化
 
 ```bash
-php phpc -s src/ -o dist/ -p app.phar
+phpc -s src/ -o dist/ -p app.phar
 ```
 
 编译源码到 `dist/`，然后打包为 `app.phar`，并自动包含 `entry.php`。
@@ -119,7 +119,7 @@ php phpc -s src/ -o dist/ -p app.phar
 ### 5. 仅打包已有目录
 
 ```bash
-php phpc -o dist/ -p app.phar
+phpc -o dist/ -p app.phar
 ```
 
 不编译，直接将 `dist/` 下的所有文件（含 `.phpc` 和 `entry.php`）打包为 Phar。
@@ -137,7 +137,7 @@ phpc 默认启用增量编译。对于每个源文件，如果满足以下条件
 3. 目标文件的 `system_id` 与当前 PHP 环境匹配
 
 ```bash
-php phpc -s src/ -o dist/
+phpc -s src/ -o dist/
 # 第二次运行会自动跳过未变更的文件
 ```
 
@@ -146,7 +146,7 @@ php phpc -s src/ -o dist/
 使用 `-f` 强制编译所有文件，忽略增量检查：
 
 ```bash
-php phpc -s src/ -o dist/ -f
+phpc -s src/ -o dist/ -f
 ```
 
 ### 禁用增量编译
@@ -154,7 +154,7 @@ php phpc -s src/ -o dist/ -f
 使用 `--no-incremental` 禁用增量机制，每次运行都会编译所有文件：
 
 ```bash
-php phpc -s src/ -o dist/ --no-incremental
+phpc -s src/ -o dist/ --no-incremental
 ```
 
 ---
@@ -166,7 +166,7 @@ php phpc -s src/ -o dist/ --no-incremental
 支持同时指定多个源路径：
 
 ```bash
-php phpc -s src/ -s vendor/lib/ -o dist/
+phpc -s src/ -s vendor/lib/ -o dist/
 ```
 
 ### glob 通配符
@@ -174,8 +174,8 @@ php phpc -s src/ -s vendor/lib/ -o dist/
 支持 shell glob 通配符：
 
 ```bash
-php phpc -s "src/lib/*.php" -o dist/
-php phpc -s "modules/*" -o dist/
+phpc -s "src/lib/*.php" -o dist/
+phpc -s "modules/*" -o dist/
 ```
 
 > 注意：包含通配符的路径建议加引号，防止 shell 提前展开。
@@ -209,7 +209,7 @@ phpc 支持通过 `opkit.json` 配置文件管理编译参数，CLI 参数优先
 ### 使用配置文件
 
 ```bash
-php phpc -c opkit.json
+phpc -c opkit.json
 ```
 
 ### 配置项说明
@@ -251,7 +251,7 @@ php phpc -c opkit.json
 使用 `-i` 或 `--info` 查看已编译 `.phpc` 文件的详细信息：
 
 ```bash
-php phpc -i dist/main.phpc
+phpc -i dist/main.phpc
 ```
 
 输出示例：
@@ -299,7 +299,7 @@ Persistent Script              0x00000070     0x00000288     536 bytes
 也可以使用子命令形式：
 
 ```bash
-php phpc info dist/main.phpc
+phpc info dist/main.phpc
 ```
 
 ---
@@ -311,14 +311,14 @@ php phpc info dist/main.phpc
 编译时如果不指定 `-p`（Phar 模式），且输出目录中有 `.phpc` 文件，会自动生成 `entry.php`：
 
 ```bash
-php phpc -s src/ -o dist/
+phpc -s src/ -o dist/
 # 自动生成 dist/entry.php
 ```
 
 ### 手动指定路径
 
 ```bash
-php phpc -e bootstrap.php -o dist/
+phpc -e bootstrap.php -o dist/
 ```
 
 生成的 `entry.php` 内容：
@@ -366,13 +366,13 @@ echo $calc->add(2, 3);
 ### 分析目录
 
 ```bash
-php phpc -a dist/
+phpc -a dist/
 ```
 
 ### 分析单文件
 
 ```bash
-php phpc analyze dist/main.phpc
+phpc analyze dist/main.phpc
 ```
 
 ### 输出示例
@@ -416,7 +416,7 @@ The following symbols are defined in multiple files:
 为编译后的 `.phpc` 文件生成 PHP IDE 存根（stub），便于静态分析和 IDE 自动补全。
 
 ```bash
-php phpc -s src/ -o dist/ --stubs stubs/
+phpc -s src/ -o dist/ --stubs stubs/
 ```
 
 生成的 stub 文件结构与源码一致，仅包含函数签名、类定义、常量声明，不含实现：
@@ -437,7 +437,7 @@ namespace App\Lib {
 如果已有编译输出，可以单独生成：
 
 ```bash
-php phpc -o dist/ --stubs stubs/
+phpc -o dist/ --stubs stubs/
 ```
 
 ---
@@ -447,13 +447,13 @@ php phpc -o dist/ --stubs stubs/
 ### 基础打包
 
 ```bash
-php phpc -o dist/ -p app.phar
+phpc -o dist/ -p app.phar
 ```
 
 ### 编译 + 打包一体化
 
 ```bash
-php phpc -s src/ -o dist/ -p app.phar
+phpc -s src/ -o dist/ -p app.phar
 ```
 
 打包时会自动在 Phar 中包含 `entry.php`（如果不存在则自动生成）。
@@ -468,13 +468,13 @@ php -d zend_extension=modules/opkit.so app.phar
 
 ```bash
 # GZip 压缩
-php phpc -o dist/ -p app.phar -z gz
+phpc -o dist/ -p app.phar -z gz
 
 # BZip2 压缩
-php phpc -o dist/ -p app.phar -z bz2
+phpc -o dist/ -p app.phar -z bz2
 
 # 不压缩（默认）
-php phpc -o dist/ -p app.phar -z none
+phpc -o dist/ -p app.phar -z none
 ```
 
 > 需要 PHP 启用对应的 `zlib` 或 `bz2` 扩展。
@@ -483,22 +483,22 @@ php phpc -o dist/ -p app.phar -z none
 
 ```bash
 # SHA1
-php phpc -o dist/ -p app.phar --sign sha1
+phpc -o dist/ -p app.phar --sign sha1
 
 # SHA256
-php phpc -o dist/ -p app.phar --sign sha256
+phpc -o dist/ -p app.phar --sign sha256
 
 # SHA512
-php phpc -o dist/ -p app.phar --sign sha512
+phpc -o dist/ -p app.phar --sign sha512
 
 # OpenSSL（需要私钥）
-php phpc -o dist/ -p app.phar --sign openssl --sign-key private.pem
+phpc -o dist/ -p app.phar --sign openssl --sign-key private.pem
 ```
 
 ### 组合示例
 
 ```bash
-php phpc -s src/ -o dist/ -p app.phar -z gz --sign sha256
+phpc -s src/ -o dist/ -p app.phar -z gz --sign sha256
 ```
 
 编译源码、GZip 压缩、SHA256 签名一体化完成。
@@ -514,7 +514,7 @@ php phpc -s src/ -o dist/ -p app.phar -z gz --sign sha256
 **解决**：
 
 ```bash
-php -d zend_extension=/path/to/opkit.so ./bin/phpc ...
+phpc ...
 ```
 
 或在 `php.ini` 中配置：
@@ -530,7 +530,7 @@ zend_extension=opkit.so
 **解决**：
 
 ```bash
-php -d phar.readonly=Off ./bin/phpc -o dist/ -p app.phar
+phpc -o dist/ -p app.phar
 ```
 
 ### "No source files found matching: ..."
@@ -544,7 +544,7 @@ php -d phar.readonly=Off ./bin/phpc -o dist/ -p app.phar
 `.phpc` 文件包含编译时的 `system_id`（由 PHP 版本 + 架构 + 编译选项决定）。如果运行环境的 `system_id` 与 `.phpc` 不匹配，`opkit_load()` 会加载失败。
 
 ```bash
-php phpc -i file.phpc
+phpc -i file.phpc
 # 查看 System ID Match: NO
 ```
 
@@ -575,15 +575,15 @@ opkit_boot('my_entry', ['arg1', 'arg2']);
 
 ```
 phpc CLI compilation tool usage:
-  php phpc -s <source_path> -o <output_dir>
-  php phpc -s <source_path> -o <output_dir> -p <output.phar>
-  php phpc -c <config.json>
-  php phpc -o <output_dir> -p <output.phar>
-  php phpc -e <entry_file_path>
-  php phpc -i <.phpc_file_path>
-  php phpc -a <dir|file>
-  php phpc analyze <dir|file>
-  php phpc -s <src> -o <out> --stubs <stubs_dir>
+  phpc -s <source_path> -o <output_dir>
+  phpc -s <source_path> -o <output_dir> -p <output.phar>
+  phpc -c <config.json>
+  phpc -o <output_dir> -p <output.phar>
+  phpc -e <entry_file_path>
+  phpc -i <.phpc_file_path>
+  phpc -a <dir|file>
+  phpc analyze <dir|file>
+  phpc -s <src> -o <out> --stubs <stubs_dir>
 
 Parameters:
   -s, --src            PHP source file or directory path
@@ -627,10 +627,10 @@ Parameters:
 
 ```bash
 # 1. 编译源码
-php -d zend_extension=modules/opkit.so ./bin/phpc -s src/ -o dist/
+phpc -s src/ -o dist/
 
 # 2. 查看编译结果信息
-php -d zend_extension=modules/opkit.so ./bin/phpc -i dist/main.phpc
+phpc -i dist/main.phpc
 
 # 3. 运行测试
 php -d zend_extension=modules/opkit.so dist/entry.php

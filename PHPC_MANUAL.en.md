@@ -33,7 +33,7 @@
 ### Simplest Compilation Example
 
 ```bash
-php -d zend_extension=modules/opkit.so ./bin/phpc -s src/ -o dist/
+phpc -s src/ -o dist/
 ```
 
 After compilation, the `dist/` directory will contain corresponding `.phpc` files and an `entry.php` entry file:
@@ -58,7 +58,7 @@ php -d zend_extension=modules/opkit.so dist/entry.php
 ### Compile a Single File
 
 ```bash
-php phpc -s index.php -o output/
+phpc -s index.php -o output/
 ```
 
 Output: `output/index.phpc`, `output/entry.php`
@@ -66,7 +66,7 @@ Output: `output/index.phpc`, `output/entry.php`
 ### Compile an Entire Directory (Recursive)
 
 ```bash
-php phpc -s src/ -o dist/
+phpc -s src/ -o dist/
 ```
 
 Automatically and recursively compiles all `.php` files under `src/`, preserving the directory structure in `dist/`.
@@ -74,7 +74,7 @@ Automatically and recursively compiles all `.php` files under `src/`, preserving
 ### Using Long Options
 
 ```bash
-php phpc --src src/ --output dist/
+phpc --src src/ --output dist/
 ```
 
 ---
@@ -84,7 +84,7 @@ php phpc --src src/ --output dist/
 ### 1. Compile Only
 
 ```bash
-php phpc -s src/ -o dist/
+phpc -s src/ -o dist/
 ```
 
 ### 2. Compile + Auto-generate entry.php
@@ -103,7 +103,7 @@ exit(opkit_boot());
 ### 3. Generate entry.php Only (No Compilation)
 
 ```bash
-php phpc -e dist/entry.php -o dist/
+phpc -e dist/entry.php -o dist/
 ```
 
 Generates the entry file based on existing `.phpc` files in the output directory.
@@ -111,7 +111,7 @@ Generates the entry file based on existing `.phpc` files in the output directory
 ### 4. Compile + Phar Packaging (All-in-One)
 
 ```bash
-php phpc -s src/ -o dist/ -p app.phar
+phpc -s src/ -o dist/ -p app.phar
 ```
 
 Compiles the source code to `dist/`, then packages it as `app.phar`, automatically including `entry.php`.
@@ -119,7 +119,7 @@ Compiles the source code to `dist/`, then packages it as `app.phar`, automatical
 ### 5. Package Existing Directory Only
 
 ```bash
-php phpc -o dist/ -p app.phar
+phpc -o dist/ -p app.phar
 ```
 
 Skips compilation and directly packages all files under `dist/` (including `.phpc` and `entry.php`) into a Phar.
@@ -137,7 +137,7 @@ Skips compilation and directly packages all files under `dist/` (including `.php
 3. The target file's `system_id` matches the current PHP environment.
 
 ```bash
-php phpc -s src/ -o dist/
+phpc -s src/ -o dist/
 # The second run will automatically skip unchanged files
 ```
 
@@ -146,7 +146,7 @@ php phpc -s src/ -o dist/
 Use `-f` to force compilation of all files, ignoring incremental checks:
 
 ```bash
-php phpc -s src/ -o dist/ -f
+phpc -s src/ -o dist/ -f
 ```
 
 ### Disable Incremental Compilation
@@ -154,7 +154,7 @@ php phpc -s src/ -o dist/ -f
 Use `--no-incremental` to disable the incremental mechanism; all files will be compiled on every run:
 
 ```bash
-php phpc -s src/ -o dist/ --no-incremental
+phpc -s src/ -o dist/ --no-incremental
 ```
 
 ---
@@ -166,7 +166,7 @@ php phpc -s src/ -o dist/ --no-incremental
 Multiple source paths can be specified simultaneously:
 
 ```bash
-php phpc -s src/ -s vendor/lib/ -o dist/
+phpc -s src/ -s vendor/lib/ -o dist/
 ```
 
 ### Glob Wildcards
@@ -174,8 +174,8 @@ php phpc -s src/ -s vendor/lib/ -o dist/
 Shell glob wildcards are supported:
 
 ```bash
-php phpc -s "src/lib/*.php" -o dist/
-php phpc -s "modules/*" -o dist/
+phpc -s "src/lib/*.php" -o dist/
+phpc -s "modules/*" -o dist/
 ```
 
 > **Note**: Paths containing wildcards should be quoted to prevent the shell from expanding them prematurely.
@@ -209,7 +209,7 @@ php phpc -s "modules/*" -o dist/
 ### Using a Configuration File
 
 ```bash
-php phpc -c opkit.json
+phpc -c opkit.json
 ```
 
 ### Configuration Item Reference
@@ -251,7 +251,7 @@ Matching rules apply to both the full path and the file name.
 Use `-i` or `--info` to view detailed information about a compiled `.phpc` file:
 
 ```bash
-php phpc -i dist/main.phpc
+phpc -i dist/main.phpc
 ```
 
 Sample output:
@@ -299,7 +299,7 @@ Persistent Script              0x00000070     0x00000288     536 bytes
 You can also use the subcommand form:
 
 ```bash
-php phpc info dist/main.phpc
+phpc info dist/main.phpc
 ```
 
 ---
@@ -311,14 +311,14 @@ php phpc info dist/main.phpc
 If `-p` (Phar mode) is not specified and `.phpc` files exist in the output directory, `entry.php` is auto-generated upon compilation:
 
 ```bash
-php phpc -s src/ -o dist/
+phpc -s src/ -o dist/
 # Automatically generates dist/entry.php
 ```
 
 ### Manual Path Specification
 
 ```bash
-php phpc -e bootstrap.php -o dist/
+phpc -e bootstrap.php -o dist/
 ```
 
 The generated `entry.php` looks like this:
@@ -366,13 +366,13 @@ echo $calc->add(2, 3);
 ### Analyze a Directory
 
 ```bash
-php phpc -a dist/
+phpc -a dist/
 ```
 
 ### Analyze a Single File
 
 ```bash
-php phpc analyze dist/main.phpc
+phpc analyze dist/main.phpc
 ```
 
 ### Sample Output
@@ -416,7 +416,7 @@ Conflicting symbols will cause a fatal error at `opkit_boot()` runtime.
 Generate PHP IDE stubs (stubs) for compiled `.phpc` files to facilitate static analysis and IDE autocompletion.
 
 ```bash
-php phpc -s src/ -o dist/ --stubs stubs/
+phpc -s src/ -o dist/ --stubs stubs/
 ```
 
 The generated stub files mirror the source structure, containing only function signatures, class definitions, and constant declarations, without implementations:
@@ -437,7 +437,7 @@ namespace App\Lib {
 If you already have compiled output, you can generate stubs separately:
 
 ```bash
-php phpc -o dist/ --stubs stubs/
+phpc -o dist/ --stubs stubs/
 ```
 
 ---
@@ -447,13 +447,13 @@ php phpc -o dist/ --stubs stubs/
 ### Basic Packaging
 
 ```bash
-php phpc -o dist/ -p app.phar
+phpc -o dist/ -p app.phar
 ```
 
 ### Compile + Package (All-in-One)
 
 ```bash
-php phpc -s src/ -o dist/ -p app.phar
+phpc -s src/ -o dist/ -p app.phar
 ```
 
 When packaging, `entry.php` is automatically included in the Phar (auto-generated if it doesn't exist).
@@ -468,13 +468,13 @@ php -d zend_extension=modules/opkit.so app.phar
 
 ```bash
 # GZip compression
-php phpc -o dist/ -p app.phar -z gz
+phpc -o dist/ -p app.phar -z gz
 
 # BZip2 compression
-php phpc -o dist/ -p app.phar -z bz2
+phpc -o dist/ -p app.phar -z bz2
 
 # No compression (default)
-php phpc -o dist/ -p app.phar -z none
+phpc -o dist/ -p app.phar -z none
 ```
 
 > Requires the corresponding `zlib` or `bz2` PHP extension.
@@ -483,22 +483,22 @@ php phpc -o dist/ -p app.phar -z none
 
 ```bash
 # SHA1
-php phpc -o dist/ -p app.phar --sign sha1
+phpc -o dist/ -p app.phar --sign sha1
 
 # SHA256
-php phpc -o dist/ -p app.phar --sign sha256
+phpc -o dist/ -p app.phar --sign sha256
 
 # SHA512
-php phpc -o dist/ -p app.phar --sign sha512
+phpc -o dist/ -p app.phar --sign sha512
 
 # OpenSSL (requires a private key)
-php phpc -o dist/ -p app.phar --sign openssl --sign-key private.pem
+phpc -o dist/ -p app.phar --sign openssl --sign-key private.pem
 ```
 
 ### Combined Example
 
 ```bash
-php phpc -s src/ -o dist/ -p app.phar -z gz --sign sha256
+phpc -s src/ -o dist/ -p app.phar -z gz --sign sha256
 ```
 
 Compiles source code, applies GZip compression, and signs with SHA256 — all in one command.
@@ -514,7 +514,7 @@ Compiles source code, applies GZip compression, and signs with SHA256 — all in
 **Solution**:
 
 ```bash
-php -d zend_extension=/path/to/opkit.so ./bin/phpc ...
+phpc ...
 ```
 
 Or configure in `php.ini`:
@@ -530,7 +530,7 @@ zend_extension=opkit.so
 **Solution**:
 
 ```bash
-php -d phar.readonly=Off ./bin/phpc -o dist/ -p app.phar
+phpc -o dist/ -p app.phar
 ```
 
 ### "No source files found matching: ..."
@@ -544,7 +544,7 @@ php -d phar.readonly=Off ./bin/phpc -o dist/ -p app.phar
 `.phpc` files contain a `system_id` from the compilation environment (derived from PHP version + architecture + compile options). If the runtime environment's `system_id` does not match the `.phpc`'s, `opkit_load()` will fail.
 
 ```bash
-php phpc -i file.phpc
+phpc -i file.phpc
 # Check if System ID Match: NO
 ```
 
@@ -575,15 +575,15 @@ opkit_boot('my_entry', ['arg1', 'arg2']);
 
 ```
 phpc CLI compilation tool usage:
-  php phpc -s <source_path> -o <output_dir>
-  php phpc -s <source_path> -o <output_dir> -p <output.phar>
-  php phpc -c <config.json>
-  php phpc -o <output_dir> -p <output.phar>
-  php phpc -e <entry_file_path>
-  php phpc -i <.phpc_file_path>
-  php phpc -a <dir|file>
-  php phpc analyze <dir|file>
-  php phpc -s <src> -o <out> --stubs <stubs_dir>
+  phpc -s <source_path> -o <output_dir>
+  phpc -s <source_path> -o <output_dir> -p <output.phar>
+  phpc -c <config.json>
+  phpc -o <output_dir> -p <output.phar>
+  phpc -e <entry_file_path>
+  phpc -i <.phpc_file_path>
+  phpc -a <dir|file>
+  phpc analyze <dir|file>
+  phpc -s <src> -o <out> --stubs <stubs_dir>
 
 Parameters:
   -s, --src            PHP source file or directory path
@@ -627,10 +627,10 @@ Parameters:
 
 ```bash
 # 1. Compile source
-php -d zend_extension=modules/opkit.so ./bin/phpc -s src/ -o dist/
+phpc -s src/ -o dist/
 
 # 2. View compilation info
-php -d zend_extension=modules/opkit.so ./bin/phpc -i dist/main.phpc
+phpc -i dist/main.phpc
 
 # 3. Run tests
 php -d zend_extension=modules/opkit.so dist/entry.php
