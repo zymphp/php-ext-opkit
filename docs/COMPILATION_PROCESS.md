@@ -724,8 +724,9 @@ int opkit_compile_script_store(zend_string *output_path, zend_persistent_script 
 │           │                                                      │
 │           ▼                                                      │
 │  ┌──────────────────┐                                           │
-│  │ 2. 分配内存       │  emalloc(mem_size + str_size)             │
-│  │    - 分配连续内存 │  - 用于脚本数据和字符串池                  │
+│  │ 2. 分配内存       │  emalloc() 或 opkit_shared_alloc()        │
+│  │    - 堆内存路径   │  - emalloc(mem_size + str_size)           │
+│  │    - SHM 路径     │  - opkit_shared_alloc(total_size)         │
 │  │    - 复制数据     │  - memcpy 从文件到内存                     │
 │  └────────┬─────────┘                                           │
 │           │                                                      │
@@ -790,6 +791,9 @@ zend_persistent_script *opkit_compile_script_load(zend_string *filename) {
 
     // 分配内存
     size_t total_size = info.mem_size + info.str_size;
+    // 当 opkit.shm_size > 0 且共享内存有足够空间时，使用 SHM 路径：
+    // mem = opkit_shared_alloc(total_size);
+    // 否则回退到堆内存路径：
     mem = emalloc(total_size);
 
     // 读取脚本数据
@@ -1170,7 +1174,113 @@ debug_log("Memory used: metadata=%zu, code=%zu, data=%zu, misc=%zu",
 
 ---
 
-## 10. 总结
+## 10. 共享内存运行时加载
+
+### 10.1 SHM 加载路径
+
+当 `opkit.shm_size` INI 配置大于 0 时，OpKit 会在 MINIT 阶段通过 `mmap(MAP_SHARED | MAP_ANONYMOUS)` 创建一块进程间共享内存。运行时加载 `.phpc` 文件时，会优先尝试将脚本数据持久化到共享内存中：
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                   SHM Runtime Loading Path                       │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  opkit_load($phpc)                                               │
+│       │                                                          │
+│       ▼                                                          │
+│  ┌──────────────────┐                                           │
+│  │ 1. 读取 .phpc 文件 │  opkit_compile_script_load()            │
+│  │    - 验证头信息    │  - 与标准加载流程相同                    │
+│  └────────┬─────────┘                                           │
+│           │                                                      │
+│           ▼                                                      │
+│  ┌──────────────────┐                                           │
+│  │ 2. 选择内存目标   │  根据 opkit.shm_size 决定                 │
+│  │    ├── SHM 路径   │  - opkit_shared_alloc(total_size)        │
+│  │    │              │  - 数据对所有 fork 子进程可见            │
+│  │    └── 堆路径     │  - emalloc(total_size)                   │
+│  │                   │  - 仅当前进程可用                        │
+│  └────────┬─────────┘                                           │
+│           │                                                      │
+│           ▼                                                      │
+│  ┌──────────────────┐                                           │
+│  │ 3. 持久化到目标   │  zend_accel_script_persist()             │
+│  │    - 复制脚本结构  │  - 使用 ZCG(mem) 作为分配基址            │
+│  │    - 设置 in_shm  │  - opkit_keep_memory() 标记 in_shm       │
+│  └────────┬─────────┘                                           │
+│           │                                                      │
+│           ▼                                                      │
+│  ┌──────────────────┐                                           │
+│  │ 4. 注册符号       │  opkit_boot()                            │
+│  │    - 函数/类/常量  │  - 每个进程独立执行                      │
+│  │    - 类链接       │  - Zend Engine 表是进程私有的            │
+│  └────────┬─────────┘                                           │
+│           │                                                      │
+│           ▼                                                      │
+│  ┌──────────────────┐                                           │
+│  │ 5. fork 子进程    │  继承父进程的 SHM 映射                   │
+│  │    - 无需重新加载  │  - 物理内存共享                          │
+│  │    - 直接执行 boot│  - 符号注册仍需独立执行                  │
+│  └──────────────────┘                                           │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 10.2 SHM 重置 (`opkit_shm_reset`)
+
+`opkit_shm_reset()` 用于清空共享内存中的所有缓存脚本：
+
+```c
+// C 实现
+bool opkit_shm_reset(void) {
+    if (!opkit_shm_segment) {
+        return false;
+    }
+    opkit_shared_alloc_lock();      // 获取进程间写锁
+    opkit_shm_segment->pos = 0;     // 重置分配偏移量
+    opkit_shared_alloc_unlock();    // 释放锁
+    return true;
+}
+```
+
+**PHP 层行为**：
+```php
+bool opkit_shm_reset();
+```
+
+PHP 层的 `opkit_shm_reset()` 在调用 C API 之前会先执行 `opkit_reset_script()`，清理当前进程已注册的符号和 `loaded_scripts` 链表。这是必要的安全措施，防止 reset 后出现悬空指针访问已释放的共享内存。
+
+**使用场景**：
+- 开发调试时快速清除缓存
+- 部署新版本前重置旧缓存
+- 内存压力较大时手动回收
+
+**注意事项**：
+- 重置后所有已加载的脚本需要重新调用 `opkit_load()`
+- 若其他进程正在使用共享内存中的脚本数据，重置可能导致这些进程崩溃（应在所有进程协调后执行）
+- 带 `fcntl` 文件锁保护，避免并发重置导致数据不一致
+
+### 10.3 SHM 统计信息 (`opkit_shm_stat`)
+
+```php
+?array opkit_shm_stat();
+```
+
+返回共享内存的使用统计：
+
+```php
+[
+    'shm_size' => 33554432,  // 总容量（由 opkit.shm_size 设置）
+    'free'     => 33072000,  // 剩余可用空间
+    'used'     => 482432,    // 已使用空间
+]
+```
+
+若共享内存未初始化（`opkit.shm_size = 0`），返回 `null`。
+
+---
+
+## 11. 总结
 
 OpKit 的编译流程核心要点：
 
@@ -1187,3 +1297,5 @@ OpKit 的编译流程核心要点：
 6. **系统 ID 验证**：确保 .phpc 文件只能在兼容的 PHP 版本和架构上运行
 
 7. **早期绑定处理**：处理类继承关系，延迟到运行时解析
+
+8. **共享内存支持**：通过 `mmap(MAP_SHARED)` 实现多进程间的脚本数据共享，降低内存占用和启动延迟

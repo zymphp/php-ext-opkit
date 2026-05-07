@@ -885,13 +885,19 @@ static zend_always_inline void *_opkit_shared_memdup_get(void *source, size_t si
 #undef zend_shared_memdup_get
 #define zend_shared_memdup_get _opkit_shared_memdup_get
 
-static zend_always_inline void _opkit_shared_alloc_unlock(void) {}
-#undef zend_shared_alloc_unlock
-#define zend_shared_alloc_unlock _opkit_shared_alloc_unlock
+#include "opkit_shared_alloc.h"
 
-static zend_always_inline void _opkit_shared_alloc_lock(void) {}
+#undef zend_shared_alloc_unlock
+#define zend_shared_alloc_unlock opkit_shared_alloc_unlock
+
 #undef zend_shared_alloc_lock
-#define zend_shared_alloc_lock _opkit_shared_alloc_lock
+#define zend_shared_alloc_lock opkit_shared_alloc_lock
+
+#undef zend_shared_alloc
+#define zend_shared_alloc opkit_shared_alloc
+
+#undef zend_accel_in_shm
+#define zend_accel_in_shm opkit_accel_in_shm
 
 #undef accel_new_interned_string
 #define accel_new_interned_string _opkit_accel_new_interned_string

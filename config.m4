@@ -34,6 +34,7 @@ if test "$PHP_OPKIT" != "no"; then
     src/opkit_util_funcs.c \
     src/opkit_zend_persist_calc.c \
     src/opkit_zend_persist.c \
+    src/opkit_shared_alloc.c \
   ], [$ext_shared],, [$PHP_OPKIT_CFLAGS -DZEND_ENABLE_STATIC_TSRMLS_CACHE=1],, [yes])
 
   PHP_ADD_EXTENSION_DEP([opkit], [phar], [true])

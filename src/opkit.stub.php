@@ -46,3 +46,9 @@ function opkit_get_info(string $filename): ?array {}
 
 /** Check if an OpKit Opcode file is already loaded */
 function opkit_is_loaded(string $filename): bool {}
+
+/** Reset shared memory allocator, clearing all cached scripts */
+function opkit_shm_reset(): bool {}
+
+/** Get shared memory statistics */
+function opkit_shm_stat(): ?array {}

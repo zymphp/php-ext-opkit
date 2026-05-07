@@ -63,6 +63,7 @@
 | **Persist** | `opkit_zend_persist.c` | 将数据复制到持久化内存（运行时） |
 | **Persist Calc** | `opkit_zend_persist_calc.c` | 计算持久化结构所需的内存大小 |
 | **Util** | `opkit_util_funcs.c` | 工具函数：哈希表持久化、校验和计算、脚本加载 |
+| **Shared Alloc** | `opkit_shared_alloc.c` | 共享内存分配器：基于 `mmap(MAP_SHARED\|MAP_ANONYMOUS)` 的进程间共享内存 |
 | **Wrapper** | `opkit_wrapper.h` | 兼容性宏定义，Zend OPcache 结构复用 |
 
 ---
@@ -117,6 +118,7 @@ typedef struct _opkit_script_node {
     void *mem_to_free;                       // 需要释放的内存块
     zend_string *loaded_path;                // 加载时的路径
     bool executed;                           // 是否已执行
+    bool in_shm;                             // 内存是否来自共享内存（fork 后子进程无需重复释放）
     struct _opkit_script_node *next;
 } opkit_script_node;
 ```
@@ -171,9 +173,10 @@ OpKit 使用逻辑内存分区来优化缓存效率：
 │     └── 累加到 metadata/code/data/misc_size                     │
 │                          │                                      │
 │                          ▼                                      │
-│  2. 分配阶段 (emalloc)                                          │
+│  2. 分配阶段 (emalloc / opkit_shared_alloc)                     │
 │     ├── 总大小 = MD + CD + DT + MS                              │
 │     └── ZCG(mem) = emalloc(total_size)                          │
+│          或 opkit_shared_alloc(total_size) (shm 开启时)         │
 │                          │                                      │
 │                          ▼                                      │
 │  3. 持久化阶段 (zend_accel_script_persist)                      │
@@ -189,6 +192,96 @@ OpKit 使用逻辑内存分区来优化缓存效率：
 │                                                                 │
 └────────────────────────────────────────────────────────────────┘
 ```
+
+### 4.4 SHM 共享内存管理
+
+OpKit 支持通过 `mmap(MAP_SHARED | MAP_ANONYMOUS)` 分配进程间共享内存，用于缓存已加载的脚本数据，实现多进程（如 PHP-FPM Worker、fork 子进程）之间的零拷贝共享。
+
+#### 共享内存数据结构
+
+```c
+typedef struct _opkit_shared_segment {
+    void   *p;      // mmap 映射的共享内存基地址
+    size_t  size;   // 总容量（由 opkit.shm_size INI 设置）
+    size_t  pos;    // 当前分配偏移量
+    size_t  end;    // 结束位置（等于 size）
+} opkit_shared_segment;
+```
+
+#### 共享内存分配器接口
+
+| 函数 | 文件 | 说明 |
+|------|------|------|
+| `opkit_shared_alloc_startup(size_t)` | `opkit_shared_alloc.c` | MINIT 阶段初始化共享内存段 |
+| `opkit_shared_alloc_shutdown()` | `opkit_shared_alloc.c` | MSHUTDOWN 阶段释放共享内存 |
+| `opkit_shared_alloc(size_t)` | `opkit_shared_alloc.c` | 从共享内存分配指定大小的块（类似 bump allocator） |
+| `opkit_shared_alloc_get_free_memory()` | `opkit_shared_alloc.c` | 返回共享内存剩余可用空间 |
+| `opkit_accel_in_shm(void*)` | `opkit_shared_alloc.c` | 判断指针是否位于共享内存范围内 |
+| `opkit_shm_reset()` | `opkit_shared_alloc.c` | 重置共享内存分配器（带进程间锁），清空所有缓存 |
+| `opkit_shared_alloc_lock/unlock()` | `opkit_shared_alloc.c` | 基于 `fcntl(F_WRLCK)` 的进程间文件锁 |
+
+#### 共享内存分配流程
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     SHM Allocation Flow                         │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  1. 初始化阶段 (MINIT)                                           │
+│     ├── 检查 opkit.shm_size INI 配置                            │
+│     ├── mmap(NULL, size, PROT_READ|PROT_WRITE,                  │
+│     │          MAP_SHARED|MAP_ANONYMOUS, -1, 0)                 │
+│     └── 创建进程间锁文件 (memfd / O_TMPFILE / mkstemp)          │
+│                          │                                       │
+│                          ▼                                       │
+│  2. 加载阶段 (opkit_load)                                        │
+│     ├── 计算脚本持久化所需内存                                   │
+│     ├── opkit_shared_alloc(total_size)                          │
+│     │   └── 若空间不足，回退到 emalloc (堆内存)                 │
+│     ├── zend_accel_script_persist(script, for_shm=1)            │
+│     └── opkit_keep_memory(script, mem, path)                    │
+│                          │                                       │
+│                          ▼                                       │
+│  3. 运行时阶段 (opkit_boot)                                      │
+│     ├── 注册函数/类/常量到 Zend Engine                          │
+│     ├── 子进程通过 fork() 继承共享内存映射                      │
+│     └── 子进程可直接访问父进程加载的脚本数据                    │
+│                          │                                       │
+│                          ▼                                       │
+│  4. 清理阶段 (RSHUTDOWN / opkit_shm_reset)                       │
+│     ├── opkit_reset_script()                                    │
+│     │   ├── 注销符号表项                                        │
+│     │   └── 释放堆分配的 runtime cache                          │
+│     └── 若 in_shm == true：不调用 efree（由 SHM 统一管理）     │
+│         若 in_shm == false：调用 efree(mem_to_free)            │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+#### 进程间共享机制
+
+由于共享内存通过 `MAP_SHARED` 映射，`fork()` 创建的子进程会继承相同的物理内存映射。因此：
+
+- **父进程**调用 `opkit_load()` 将脚本数据写入共享内存后，子进程无需再次加载即可直接访问。
+- **符号注册**（`opkit_boot()`）仍然需要在每个进程中独立执行，因为 Zend Engine 的函数表/类表是进程私有的。
+- **内存释放**：RSHUTDOWN 时仅释放堆分配的 `opkit_script_node`  bookkeeping 结构和 runtime cache，共享内存中的脚本数据本身不释放，直到调用 `opkit_shm_reset()` 或进程结束。
+
+#### SHM 重置与安全性
+
+```c
+// C API
+bool opkit_shm_reset(void);
+
+// PHP API
+bool opkit_shm_reset();
+```
+
+`opkit_shm_reset()` 的行为：
+1. 获取进程间写锁（`opkit_shared_alloc_lock`）
+2. 将共享内存分配器的 `pos` 重置为 0
+3. 释放锁
+
+PHP 层的 `opkit_shm_reset()` 会先调用 `opkit_reset_script()` 清理当前进程已注册的符号和 `loaded_scripts` 链表，防止 reset 后出现悬空指针访问。调用后已加载的脚本需要重新 `opkit_load()`。
 
 ---
 
@@ -381,6 +474,8 @@ exit(opkit_boot());
 | `opkit_get_info()` | `$filename` | ?array | 获取 .phpc 文件信息 |
 | `opkit_gen_entry_file()` | `$output_path` | bool | 生成入口文件 |
 | `opkit_is_loaded()` | `$filename` | bool | 检查 .phpc 文件是否已加载 |
+| `opkit_shm_reset()` | 无 | bool | 重置共享内存分配器，清空所有缓存脚本 |
+| `opkit_shm_stat()` | 无 | ?array | 获取共享内存统计信息（shm_size、used、free） |
 
 ### 9.2 内部 C 函数
 
@@ -392,6 +487,10 @@ exit(opkit_boot());
 | `zend_accel_script_persist()` | `opkit_zend_persist.c` | 持久化脚本到内存 |
 | `zend_accel_script_persist_calc()` | `opkit_zend_persist_calc.c` | 计算内存需求 |
 | `zend_accel_load_script()` | `opkit_util_funcs.c` | 加载脚本到运行时 |
+| `opkit_shared_alloc_startup()` | `opkit_shared_alloc.c` | 初始化共享内存段 |
+| `opkit_shared_alloc()` | `opkit_shared_alloc.c` | 从共享内存分配块 |
+| `opkit_shm_reset()` | `opkit_shared_alloc.c` | 重置共享内存分配器 |
+| `opkit_accel_in_shm()` | `opkit_shared_alloc.c` | 判断指针是否在共享内存中 |
 
 ---
 
@@ -471,6 +570,11 @@ make
 | `23_is_loaded.phpt` | 加载检测 | opkit_is_loaded |
 | `24_php85_fcc_const.phpt` | PHP 8.5 FCC 常量 | 第一类可调用对象 |
 | `25_property_type_info.phpt` | 属性类型元数据 | opkit_get_info 类型提取 |
+| `26_shared_memory.phpt` | 共享内存加载 | opkit.shm_size INI |
+| `27_fork_shm.phpt` | Fork 共享内存验证 | 需要 pcntl |
+| `28_shm_memory.phpt` | SHM 内存占用对比 | 堆 vs SHM |
+| `29_shm_reset_fork.phpt` | SHM reset + fork | opkit_shm_reset + pcntl |
+| `30_shm_hit_rate.phpt` | SHM 命中率/reset | opkit_shm_stat + reset |
 
 ### 11.2 测试格式
 

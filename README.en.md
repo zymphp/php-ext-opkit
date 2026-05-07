@@ -22,6 +22,8 @@ OpKit (Opcode Toolkit) is an **experimental** Opcode pre-compilation and persist
 
 ### 3. Runtime Environment and Analysis
 - **Shadow Partition Statistics**: Provides memory usage analysis for four partitions: Metadata, Code, Data, and Misc, displaying resource consumption.
+- **Shared Memory Cache**: Supports caching script data into inter-process shared memory via `mmap(MAP_SHARED)`, enabling zero-copy sharing across multiple processes (e.g., PHP-FPM Workers) and significantly reducing memory footprint and startup latency.
+- **SHM Management**: Provides `opkit_shm_reset()` to clear shared memory cache and `opkit_shm_stat()` for real-time shared memory usage statistics.
 - **Batch Loading**: Mount all compilation products of a project at once via `opkit_load_multi`.
 - **Flexible Bootstrapping**: `opkit_boot` supports custom entry functions (default is `main`) and dynamic parameter passing.
 - **Error Tolerance**: Automatically skips erroneous files during batch compilation and provides ParseError line numbers and cause identification.
@@ -193,6 +195,12 @@ OpKit provides the following technical documentation to help you understand the 
 ### Debugging and Analysis
 - `opkit_get_info(string $filename): ?array`
   Extracts metadata from a binary file.
+
+### Shared Memory Management
+- `opkit_shm_reset(): bool`
+  Resets the shared memory allocator, clearing all cached script data. Automatically cleans up currently registered symbols before reset to prevent dangling pointers.
+- `opkit_shm_stat(): ?array`
+  Returns shared memory statistics including `shm_size` (total capacity), `used` (bytes used), and `free` (bytes remaining). Returns `null` if shared memory is not enabled.
 
 ---
 

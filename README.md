@@ -22,6 +22,8 @@ OpKit (Opcode Toolkit) 是一个处于 **实验阶段** 的 PHP Opcode 预编译
 
 ### 3. 运行环境与分析
 - **影子分区统计**: 提供 Metadata、Code、Data、Misc 四个分区的内存占用分析，展示资源消耗情况。
+- **共享内存缓存**: 支持通过 `mmap(MAP_SHARED)` 将脚本数据缓存到进程间共享内存，实现多进程（如 PHP-FPM Worker）零拷贝共享，显著降低内存占用和启动延迟。
+- **SHM 管理**: 提供 `opkit_shm_reset()` 一键清空共享内存缓存，`opkit_shm_stat()` 实时查看共享内存使用统计。
 - **批量加载**: 通过 `opkit_load_multi` 挂载项目的编译产物。
 - **灵活引导**: `opkit_boot` 支持自定义入口函数（默认为 `main`）并支持参数传递。
 - **错误容忍**: 在批量编译中自动跳过错误文件，并提供 ParseError 行号和原因定位。
@@ -193,6 +195,12 @@ OpKit 提供以下技术文档，帮助深入了解系统实现：
 ### 调试与分析
 - `opkit_get_info(string $filename): ?array`
   提取二进制文件的元数据。
+
+### 共享内存管理
+- `opkit_shm_reset(): bool`
+  重置共享内存分配器，清空所有缓存的脚本数据。调用前会自动清理当前进程已注册的符号，防止悬空指针。
+- `opkit_shm_stat(): ?array`
+  获取共享内存统计信息，返回包含 `shm_size`（总容量）、`used`（已使用）和 `free`（剩余）的数组。若未启用共享内存则返回 `null`。
 
 ---
 

@@ -253,6 +253,9 @@ zend_shared_alloc_register_xlat_entry(source, offset);
     - 验证 checksum
     ↓
 分配内存并读取数据
+    ├── 堆内存路径: mem = emalloc(total_size)
+    └── SHM 路径:   mem = opkit_shared_alloc(total_size)
+                      (当 opkit.shm_size > 0 且空间充足时)
     ↓
 反序列化 (zend_file_cache_unserialize)
     - 恢复所有指针偏移量
@@ -269,6 +272,15 @@ zend_shared_alloc_register_xlat_entry(source, offset);
     ↓
 执行全局代码 (define, const 等)
 ```
+
+### 共享内存加载说明
+
+当 `opkit.shm_size` 大于 0 时，反序列化后的脚本数据会存储在 `mmap(MAP_SHARED)` 映射的共享内存中。这意味着：
+
+- **文件数据**仍需要从磁盘读取到临时缓冲区
+- **持久化阶段**将数据从临时缓冲区复制到共享内存（通过 `zend_accel_script_persist`）
+- **子进程继承**：`fork()` 后子进程继承父进程的共享内存映射，无需重新读取文件
+- **内存标记**：`opkit_script_node->in_shm` 标记内存来源，RSHUTDOWN 时 SHM 内存不释放
 
 ---
 

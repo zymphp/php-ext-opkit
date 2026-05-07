@@ -56,6 +56,7 @@ typedef struct _opkit_script_node {
 	void *mem_to_free;
 	zend_string *loaded_path;
 	bool executed;
+	bool in_shm;
 	struct _opkit_script_node *next;
 } opkit_script_node;
 
@@ -158,6 +159,7 @@ void opkit_keep_memory(zend_persistent_script *script, void *mem_to_free, zend_s
 	node->mem_to_free = mem_to_free;
 	node->loaded_path = path ? zend_string_init(ZSTR_VAL(path), ZSTR_LEN(path), 0) : NULL;
 	node->executed = false;
+	node->in_shm = (mem_to_free != NULL) && opkit_accel_in_shm(mem_to_free);
 	node->next = loaded_scripts;
 	loaded_scripts = node;
 }
@@ -185,7 +187,7 @@ static void opkit_reset_script(void) {
 				}
 			}
 		}
-		if (node->mem_to_free) {
+		if (node->mem_to_free && !node->in_shm) {
 			efree(node->mem_to_free);
 		}
 		if (node->loaded_path) {
@@ -1720,14 +1722,39 @@ int start_opkit_module(void)
 	return zend_startup_module(&opkit_module_entry);
 }
 
+ZEND_BEGIN_MODULE_GLOBALS(opkit)
+	zend_long shm_size;
+ZEND_END_MODULE_GLOBALS(opkit)
+
+ZEND_DECLARE_MODULE_GLOBALS(opkit)
+
+#ifdef ZTS
+#define OPKIT_G(v) TSRMG(opkit_globals_id, zend_opkit_globals *, v)
+#else
+#define OPKIT_G(v) (opkit_globals.v)
+#endif
+
 ZEND_INI_BEGIN()
+	STD_PHP_INI_ENTRY("opkit.shm_size", "0", PHP_INI_SYSTEM, OnUpdateLong, shm_size, zend_opkit_globals, opkit_globals)
 ZEND_INI_END()
+
+static void php_opkit_init_globals(void *global)
+{
+	zend_opkit_globals *opkit_globals = (zend_opkit_globals *)global;
+	opkit_globals->shm_size = 0;
+}
 
 static ZEND_MINIT_FUNCTION(opkit)
 {
 	(void)type; /* keep the compiler happy */
 
 	REGISTER_INI_ENTRIES();
+
+	if (OPKIT_G(shm_size) > 0) {
+		if (opkit_shared_alloc_startup((size_t)OPKIT_G(shm_size)) == FAILURE) {
+			zend_error(E_WARNING, "opkit: failed to allocate shared memory of size %zu", (size_t)OPKIT_G(shm_size));
+		}
+	}
 
 	return SUCCESS;
 }
@@ -1743,6 +1770,7 @@ static ZEND_MSHUTDOWN_FUNCTION(opkit)
 {
 	(void)type; /* keep the compiler happy */
 
+	opkit_shared_alloc_shutdown();
 	UNREGISTER_INI_ENTRIES();
 	return SUCCESS;
 }
@@ -1759,6 +1787,32 @@ static PHP_MINFO_FUNCTION(opkit)
 	DISPLAY_INI_ENTRIES();
 }
 
+ZEND_FUNCTION(opkit_shm_reset) {
+	if (zend_parse_parameters_none() == FAILURE) {
+		RETURN_THROWS();
+	}
+	/* Clean up all currently loaded script nodes and registered symbols
+	 * before resetting the SHM allocator to prevent dangling pointers.
+	 */
+	opkit_reset_script();
+	RETURN_BOOL(opkit_shm_reset());
+}
+
+ZEND_FUNCTION(opkit_shm_stat) {
+	if (zend_parse_parameters_none() == FAILURE) {
+		RETURN_THROWS();
+	}
+
+	if (!opkit_shared_alloc_get_free_memory()) {
+		RETURN_NULL();
+	}
+
+	array_init(return_value);
+	add_assoc_long(return_value, "shm_size", (zend_long)OPKIT_G(shm_size));
+	add_assoc_long(return_value, "free", (zend_long)opkit_shared_alloc_get_free_memory());
+	add_assoc_long(return_value, "used", (zend_long)(OPKIT_G(shm_size) - opkit_shared_alloc_get_free_memory()));
+}
+
 static const zend_function_entry opkit_functions[] = {
 	ZEND_FE(opkit_compile_file, arginfo_opkit_compile_file)
 	ZEND_FE(opkit_compile_dir, arginfo_opkit_compile_dir)
@@ -1768,10 +1822,12 @@ static const zend_function_entry opkit_functions[] = {
 	ZEND_FE(opkit_gen_entry_file, arginfo_opkit_gen_entry_file)
 	ZEND_FE(opkit_get_info, arginfo_opkit_get_info)
 	ZEND_FE(opkit_is_loaded, arginfo_opkit_is_loaded)
+	ZEND_FE(opkit_shm_reset, arginfo_opkit_shm_reset)
+	ZEND_FE(opkit_shm_stat, arginfo_opkit_shm_stat)
 	ZEND_FE_END
 };
 
-zend_module_entry opkit_module_entry = {
+	zend_module_entry opkit_module_entry = {
 	STANDARD_MODULE_HEADER,
 	OPKIT_EXTENSION_NAME,
 	opkit_functions,
@@ -1781,7 +1837,9 @@ zend_module_entry opkit_module_entry = {
 	PHP_RSHUTDOWN(opkit),
 	ZEND_MINFO(opkit),
 	OPKIT_EXTENSION_VERSION,
-	NO_MODULE_GLOBALS,
+	ZEND_MODULE_GLOBALS(opkit),
+	php_opkit_init_globals,
+	NULL,
 	NULL,
 	STANDARD_MODULE_PROPERTIES_EX
 };

@@ -1449,17 +1449,42 @@ zend_persistent_script *opkit_compile_script_load(zend_string *filename)
 		return NULL;
 	}
 
-	buf = emalloc(info.mem_size + info.str_size);
-	if (php_stream_read(stream, buf, info.mem_size + info.str_size) != (size_t)(info.mem_size + info.str_size)) {
-		efree(buf);
-		php_stream_close(stream);
-		return NULL;
-	}
-	php_stream_close(stream);
+	{
+		void *shm_buf = NULL;
+		bool use_shm = false;
+		size_t total_size = info.mem_size + info.str_size;
 
-	script = (zend_persistent_script *)((char *)buf + info.script_offset);
-	script->mem = buf;
-	script->size = info.mem_size;
+		if (opkit_shared_alloc_get_free_memory() >= total_size) {
+			opkit_shared_alloc_lock();
+			shm_buf = opkit_shared_alloc(total_size);
+			opkit_shared_alloc_unlock();
+			if (shm_buf) {
+				use_shm = true;
+			}
+		}
+
+		if (use_shm) {
+			buf = shm_buf;
+		} else {
+			buf = emalloc(total_size);
+		}
+
+		if (php_stream_read(stream, buf, total_size) != (size_t)total_size) {
+			if (!use_shm) {
+				efree(buf);
+			}
+			php_stream_close(stream);
+			return NULL;
+		}
+		php_stream_close(stream);
+
+		script = (zend_persistent_script *)((char *)buf + info.script_offset);
+		script->mem = buf;
+		script->size = info.mem_size;
+		if (use_shm) {
+			script->corrupted = 0;
+		}
+	}
 
 	ZCG(mem) = (void*)((char*)buf + info.mem_size);
 	string_pool_base = ZCG(mem);
