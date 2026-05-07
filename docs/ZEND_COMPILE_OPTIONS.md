@@ -176,6 +176,9 @@ OpKit 在编译 PHP 脚本时设置以下选项：
 CG(compiler_options) |= ZEND_COMPILE_WITHOUT_EXECUTION;      // 只编译不执行
 CG(compiler_options) |= ZEND_COMPILE_IGNORE_INTERNAL_CLASSES; // 不处理内部类继承
 CG(compiler_options) |= ZEND_COMPILE_DELAYED_BINDING;         // 延迟类绑定
+CG(compiler_options) |= ZEND_COMPILE_HANDLE_OP_ARRAY;         // 启用 op_array 处理器
+CG(compiler_options) |= ZEND_COMPILE_IGNORE_OBSERVER;         // 忽略 observer 通知
+CG(compiler_options) |= ZEND_COMPILE_WITH_FILE_CACHE;         // 标记可存储到文件缓存
 CG(compiler_options) |= ZEND_COMPILE_IGNORE_OTHER_FILES;      // 忽略其他文件的符号
 ```
 
@@ -186,4 +189,7 @@ CG(compiler_options) |= ZEND_COMPILE_IGNORE_OTHER_FILES;      // 忽略其他文
 | `ZEND_COMPILE_WITHOUT_EXECUTION` | 标记这是 opcache_compile_file() 调用，编译的脚本不会被执行 |
 | `ZEND_COMPILE_IGNORE_INTERNAL_CLASSES` | 避免编译时因内部类不存在而出错，假设运行时内部类可用 |
 | `ZEND_COMPILE_DELAYED_BINDING` | 将类继承的早期绑定延迟到运行时，处理复杂的类依赖关系 |
+| `ZEND_COMPILE_HANDLE_OP_ARRAY` | 启用 op_array 处理器回调，允许 Zend 扩展在编译完成后处理 op_array |
+| `ZEND_COMPILE_IGNORE_OBSERVER` | 忽略 observer 扩展的通知，编译后手动处理 |
+| `ZEND_COMPILE_WITH_FILE_CACHE` | 标记编译结果可能存储到文件缓存，影响优化决策 |
 | `ZEND_COMPILE_IGNORE_OTHER_FILES` | 只收集当前编译文件定义的函数/类/常量，忽略 include 的其他文件 |

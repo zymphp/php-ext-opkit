@@ -127,49 +127,62 @@ static bool opkit_do_compile_file(zend_string *output_path, zend_string *script_
 ```c
 // opkit_compile.c: opkit_compile_file()
 zend_persistent_script *opkit_compile_file(zend_file_handle *file_handle, int type, zend_op_array **op_array_p) {
-    zend_persistent_script *persistent_script;
-    uint32_t function_count, class_count, constant_count;
+    zend_persistent_script *new_persistent_script;
+    uint32_t orig_functions_count, orig_class_count, orig_constants_count;
     zend_op_array *orig_active_op_array = CG(active_op_array);
     zend_op_array *op_array;
-
-    // 创建持久化脚本结构
-    persistent_script = create_persistent_script();
+    uint32_t orig_compiler_options = 0;
 
     // 记录编译前全局表中的数量
-    function_count = CG(function_table)->nNumUsed;
-    class_count = CG(class_table)->nNumUsed;
-    constant_count = EG(zend_constants)->nNumUsed;
+    orig_functions_count = CG(function_table)->nNumUsed;
+    orig_class_count = CG(class_table)->nNumUsed;
+    orig_constants_count = EG(zend_constants)->nNumUsed;
+
+    // 设置编译选项
+    CG(compiler_options) |= ZEND_COMPILE_WITHOUT_EXECUTION;
+    CG(compiler_options) |= ZEND_COMPILE_IGNORE_INTERNAL_CLASSES;
+    CG(compiler_options) |= ZEND_COMPILE_DELAYED_BINDING;
+    CG(compiler_options) |= ZEND_COMPILE_HANDLE_OP_ARRAY;
+    CG(compiler_options) |= ZEND_COMPILE_IGNORE_OBSERVER;
+    CG(compiler_options) |= ZEND_COMPILE_WITH_FILE_CACHE;
+    CG(compiler_options) |= ZEND_COMPILE_IGNORE_OTHER_FILES;
+
+    // 临时绕过 OPcache 钩子（如已加载），使用原始编译器
+    zend_op_array *(*saved_compile_file)(zend_file_handle*, int) = zend_compile_file;
+    extern zend_op_array *compile_file(zend_file_handle*, int);
+    zend_compile_file = compile_file;
 
     // 调用 PHP 编译器
     op_array = zend_compile_file(file_handle, type);
+    zend_compile_file = saved_compile_file;  // 恢复 OPcache 钩子
 
     if (op_array) {
-        // 复制主 op_array
-        persistent_script->script.main_op_array = *op_array;
+        // 手动注册 ZEND_DECLARE_CONST 定义的常量到全局常量表
+        // （因为 ZEND_COMPILE_WITHOUT_EXECUTION 会阻止运行时执行）
+        // ...
 
-        // 移动新定义的函数到脚本表
-        zend_accel_move_user_functions(CG(function_table),
-            CG(function_table)->nNumUsed - function_count,
-            &persistent_script->script);
+        // 预解析 IS_CONSTANT_AST：将常量引用解析为实际值
+        // 避免 persist 阶段访问已释放的 arena 内存
+        zval_update_constant_ex(...)  // 对属性默认值、类常量、字面量等
 
-        // 移动新定义的类到脚本表
-        zend_accel_move_user_classes(CG(class_table),
-            CG(class_table)->nNumUsed - class_count,
-            &persistent_script->script);
+        // 创建持久化脚本结构
+        new_persistent_script = create_persistent_script();
+        new_persistent_script->script.main_op_array = *op_array;
 
-        // 移动新定义的常量到脚本表
-        zend_accel_move_user_constants(EG(zend_constants),
-            EG(zend_constants)->nNumUsed - constant_count,
-            persistent_script);
+        // 移动新定义的函数/类/常量到脚本表
+        zend_accel_move_user_functions(CG(function_table), ...);
+        zend_accel_move_user_classes(CG(class_table), ...);
+        zend_accel_move_user_constants(EG(zend_constants), ...);
 
-        // 处理早期绑定（继承关系）
-        zend_accel_build_delayed_early_binding_list(persistent_script);
-        zend_accel_finalize_delayed_early_binding_list(persistent_script);
+        // 处理早期绑定
+        zend_accel_build_delayed_early_binding_list(new_persistent_script);
+        new_persistent_script->warnings = zend_persist_warnings(...);
 
         efree(op_array);
     }
 
-    return persistent_script;
+    CG(compiler_options) = orig_compiler_options;
+    return new_persistent_script;
 }
 ```
 
@@ -726,24 +739,17 @@ int opkit_compile_script_store(zend_string *output_path, zend_persistent_script 
 │           │                                                      │
 │           ▼                                                      │
 │  ┌──────────────────┐                                           │
-│  │ 4. 指针修复       │  fix_script_pointers()                    │
-│  │    - 修复操作码   │  - 绝对地址转相对偏移                      │
-│  │    - 修复跳转     │  - 恢复 jmp_addr                          │
-│  │    - 修复常量     │  - 恢复 zv 指针                           │
-│  └────────┬─────────┘                                           │
-│           │                                                      │
-│           ▼                                                      │
-│  ┌──────────────────┐                                           │
-│  │ 5. 注册到引擎     │  opkit_boot() / opkit_load()              │
+│  │ 4. 注册到引擎     │  opkit_boot()                             │
 │  │    - 注册函数     │  - CG(function_table)                     │
 │  │    - 注册类       │  - CG(class_table)                        │
 │  │    - 注册常量     │  - EG(zend_constants)                     │
+│  │    - 类链接       │  - opkit_link_classes()                   │
 │  │    - 早期绑定     │  - zend_accel_do_delayed_early_binding    │
 │  └────────┬─────────┘                                           │
 │           │                                                      │
 │           ▼                                                      │
 │  ┌──────────────────┐                                           │
-│  │ 6. 执行脚本       │  zend_execute()                           │
+│  │ 5. 执行脚本       │  zend_execute()                           │
 │  │    - 准备运行时   │  - 初始化 runtime cache                   │
 │  │    - 执行入口     │  - 执行 main_op_array                     │
 │  │    - 处理返回值   │  - 返回执行结果                            │
@@ -808,11 +814,8 @@ zend_persistent_script *opkit_compile_script_load(zend_string *filename) {
     script = (zend_persistent_script*)buf;
     script->mem = buf;
 
-    // 反序列化
+    // 反序列化（内含指针修复）
     zend_file_cache_unserialize(script, &info, buf);
-
-    // 修复指针
-    fix_script_pointers(script, buf);
 
     return script;
 }
@@ -859,44 +862,33 @@ static void zend_file_cache_unserialize(zend_persistent_script *script, zend_fil
 
 ### 6.4 指针修复
 
-加载后需要修复操作码中的绝对地址：
+指针修复在反序列化过程中内联完成（`zend_file_cache_unserialize_op_array`），无需单独的修复阶段：
 
 ```c
-// 修复操作码中的指针
-static void fix_opline_pointers(zend_op *opline, uint32_t last, void *buf, zend_persistent_script *script)
-{
-    zend_op *end = opline + last;
-
-    while (opline < end) {
+// 在反序列化 op_array 时自动修复
+while (opline < end) {
 #if ZEND_USE_ABS_CONST_ADDR
-        // 修复常量操作数地址
-        if (opline->op1_type == IS_CONST) {
-            zval *zv = RT_CONSTANT(opline, opline->op1);
-            UNSERIALIZE_PTR(zv);
-            opline->op1.zv = (zval*)((char*)zv - (char*)script->mem);
-        }
-        if (opline->op2_type == IS_CONST) {
-            zval *zv = RT_CONSTANT(opline, opline->op2);
-            UNSERIALIZE_PTR(zv);
-            opline->op2.zv = (zval*)((char*)zv - (char*)script->mem);
-        }
+    if (opline->op1_type == IS_CONST) {
+        UNSERIALIZE_PTR(opline->op1.zv);
+    }
+    if (opline->op2_type == IS_CONST) {
+        UNSERIALIZE_PTR(opline->op2.zv);
+    }
 #endif
 #if ZEND_USE_ABS_JMP_ADDR
-        // 修复跳转地址
-        switch (opline->opcode) {
-            case ZEND_JMP:
-            case ZEND_FAST_CALL:
-                UNSERIALIZE_PTR(opline->op1.jmp_addr);
-                break;
-            case ZEND_JMPZ:
-            case ZEND_JMPNZ:
-                // ...
-                UNSERIALIZE_PTR(opline->op2.jmp_addr);
-                break;
-        }
-#endif
-        opline++;
+    switch (opline->opcode) {
+        case ZEND_JMP:
+        case ZEND_FAST_CALL:
+            UNSERIALIZE_PTR(opline->op1.jmp_addr);
+            break;
+        case ZEND_JMPZ:
+        case ZEND_JMPNZ:
+            // ...
+            UNSERIALIZE_PTR(opline->op2.jmp_addr);
+            break;
     }
+#endif
+    opline++;
 }
 ```
 

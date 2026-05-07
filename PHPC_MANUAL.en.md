@@ -514,26 +514,22 @@ Compiles source code, applies GZip compression, and signs with SHA256 — all in
 
 **Cause**: The OpKit extension is not loaded, or `extension=` was used instead of `zend_extension=`.
 
-**Solution**:
-
-```bash
-phpc ...
-```
-
-Or configure in `php.ini`:
+**Solution**: Configure in `php.ini`:
 
 ```ini
 zend_extension=opkit.so
 ```
 
+> All commands in this document assume the above environment is ready, so `-d zend_extension=` or `-d phar.readonly=` are not explicitly shown. If not configured via `php.ini`, prepend the corresponding flags to the commands.
+
 ### "phar.readonly is On"
 
 **Cause**: Phar is read-only by default, preventing creation or modification.
 
-**Solution**:
+**Solution**: Configure in `php.ini`:
 
-```bash
-phpc -o dist/ -p app.phar
+```ini
+phar.readonly=Off
 ```
 
 ### "No source files found matching: ..."
@@ -637,16 +633,6 @@ phpc -i dist/main.phpc
 
 # 3. Run tests
 php dist/entry.php
-```
-
-### Release Phase
-
-```bash
-# Compile + generate stubs + package Phar
-phpc -s src/ -o dist/ -p app.phar -z gz --sign sha256 --stubs stubs/
-
-# Run the Phar
-php app.phar
 ```
 
 ### Release Phase

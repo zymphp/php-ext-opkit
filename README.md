@@ -182,11 +182,13 @@ OpKit 提供以下技术文档，帮助深入了解系统实现：
   加载单个 `.phpc` 文件到持久化内存。
 - `opkit_load_multi(array $filenames): void`
   批量加载文件，效率更高。
-- `opkit_boot(callable|string|null $entry = "main", array $args = []): mixed`
+- `opkit_boot(callable|string|null $entry = "main", array $args = []): int`
   1. 注册所有已加载脚本的符号（类、函数、常量）。
   2. 执行各脚本的顶层指令（如 `define`）。
   3. 调用 `$entry` 指定的入口函数（默认为全局 `main`）。
-  4. 返回入口函数的返回值。若未加载脚本、找不到入口函数或调用失败，将抛出异常。
+  4. 返回入口函数的返回值（仅当返回值为 `int` 时直接返回，否则返回 0）。若未加载脚本、找不到入口函数或调用失败，将抛出异常。
+- `opkit_is_loaded(string $filename): bool`
+  检查指定的 `.phpc` 文件是否已被加载。
 
 ### 调试与分析
 - `opkit_get_info(string $filename): ?array`

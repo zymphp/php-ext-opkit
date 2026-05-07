@@ -514,26 +514,22 @@ phpc -s src/ -o dist/ -p app.phar -z gz --sign sha256
 
 **原因**：PHP 未加载 OpKit 扩展，或使用了 `extension=` 而非 `zend_extension=`。
 
-**解决**：
-
-```bash
-phpc ...
-```
-
-或在 `php.ini` 中配置：
+**解决**：在 `php.ini` 中配置：
 
 ```ini
 zend_extension=opkit.so
 ```
 
+> 本文档所有命令均假设以上环境已就绪，因此不再在命令行中显式指定 `-d zend_extension=` 或 `-d phar.readonly=`。若未通过 `php.ini` 配置，请在命令前追加对应参数。
+
 ### "phar.readonly is On"
 
 **原因**：Phar 默认只读，禁止创建/修改。
 
-**解决**：
+**解决**：在 `php.ini` 中配置：
 
-```bash
-phpc -o dist/ -p app.phar
+```ini
+phar.readonly=Off
 ```
 
 ### "No source files found matching: ..."

@@ -182,11 +182,13 @@ OpKit provides the following technical documentation to help you understand the 
   Loads a single `.phpc` file into persistent memory.
 - `opkit_load_multi(array $filenames): void`
   Batch loads files, more efficient.
-- `opkit_boot(callable|string|null $entry = "main", array $args = []): mixed`
+- `opkit_boot(callable|string|null $entry = "main", array $args = []): int`
   1. Registers symbols (classes, functions, constants) from all loaded scripts.
   2. Executes top-level instructions (e.g., `define`) of each script.
   3. Calls the entry function specified by `$entry` (defaults to global `main`).
-  4. Returns the return value of the entry function. Throws exceptions if no script is loaded, the entry point is not found, or the call fails.
+  4. Returns the return value of the entry function (returns directly only when the return value is `int`, otherwise returns 0). Throws exceptions if no script is loaded, the entry point is not found, or the call fails.
+- `opkit_is_loaded(string $filename): bool`
+  Checks whether the specified `.phpc` file has already been loaded.
 
 ### Debugging and Analysis
 - `opkit_get_info(string $filename): ?array`

@@ -89,3 +89,4 @@
 ### 跳过的测试
 - `tests/05_triple_des.phpt` - 需要 openssl 扩展
 - `tests/18_property_hooks.phpt` - PHP 8.4+ 专属（在 8.2/8.3 跳过）
+- `tests/24_php85_fcc_const.phpt` - PHP 8.5+ 专属（在 8.2/8.3/8.4 跳过）

@@ -6,7 +6,7 @@
 
 **核心特性**：
 - 基于 Zend OPcache 架构
-- 支持 PHP 8.2/8.3/8.4
+- 支持 PHP 8.2/8.3/8.4/8.5
 - 使用影子内存分区（Metadata/Code/Data/Misc）进行持久化存储
 - 增量编译支持
 - Phar 打包支持
@@ -113,14 +113,11 @@ typedef struct _zend_persistent_script {
 
 ```c
 typedef struct _opkit_script_node {
-    zend_string *filename;                   // 文件名
-    char *orig_path;                         // 原始路径
-    char *current_path;                      // 当前路径
     zend_persistent_script *script;          // 持久化脚本
-    zend_op_array *main_op_array;            // 主操作码数组
+    void *mem_to_free;                       // 需要释放的内存块
+    zend_string *loaded_path;                // 加载时的路径
     bool executed;                           // 是否已执行
     struct _opkit_script_node *next;
-    struct _opkit_script_node *prev;
 } opkit_script_node;
 ```
 
@@ -188,7 +185,7 @@ OpKit 使用逻辑内存分区来优化缓存效率：
 │  4. 文件存储阶段 (opkit_compile_script_store)                   │
 │     ├── 写入 metainfo 头                                        │
 │     ├── 写入序列化后的脚本                                      │
-│     └── 可选：使用 TripleDES 加密                               │
+│     └── 写入字符串池                                            │
 │                                                                 │
 └────────────────────────────────────────────────────────────────┘
 ```
@@ -259,20 +256,22 @@ OpKit 使用指针偏移量序列化技术将内存结构持久化到文件：
 #endif
 ```
 
-### 7.2 PHP 8.4 主要兼容性修改
+### 7.2 PHP 8.4/8.5 主要兼容性修改
 
 | 特性 | PHP 8.2/8.3 | PHP 8.4+ |
 |------|-------------|----------|
 | `doc_comment` | 存在于 `zend_property_info` | 已移除 |
-| Property Hooks | 不支持 | 支持 (4种钩子) |
+| Property Hooks | 不支持 | 支持 (2 种钩子: get, set) |
 | `prop_info` | 不存在于 `zend_op_array` | 存在 |
 | Runtime Cache | 堆分配时需要手动清理 | 堆分配时需要手动清理 |
+| FCC 常量 (PHP 8.5) | 不支持 | 支持 `ZEND_AST_CALLABLE_CONVERT` |
+| `ZEND_DECLARE_ATTRIBUTED_CONST` | 不支持 | 支持 (PHP 8.5) |
 
 ### 7.3 Property Hooks 支持
 
 ```c
 #if PHP_VERSION_ID >= 80400
-#define ZEND_PROPERTY_HOOK_COUNT 4  // get, set, isset, unset
+#define ZEND_PROPERTY_HOOK_COUNT 2  // get, set
 #define ZEND_PROPERTY_HOOK_STRUCT_SIZE (sizeof(zend_function*) * ZEND_PROPERTY_HOOK_COUNT)
 #endif
 ```
@@ -336,13 +335,19 @@ bin/phpc
 生成的 `entry.php` 示例：
 ```php
 <?php
-// OpKit auto-generated entry file
+
 if (!extension_loaded('opkit')) {
-    die("Error: OpKit extension not loaded.\n");
+    if (!@dl('opkit.so')) {
+        trigger_error('OpKit extension not loaded', E_USER_ERROR);
+    }
 }
-__DIR__ !== '' && chdir(__DIR__);
-$result = opkit_boot();
-exit($result ?? 0);
+
+opkit_load_multi([
+    __DIR__ . '/main.phpc',
+    __DIR__ . '/lib/utils.phpc',
+]);
+
+exit(opkit_boot());
 ```
 
 ### 8.3 配置文件格式 (opkit.json)
@@ -369,11 +374,13 @@ exit($result ?? 0);
 | 函数 | 参数 | 返回值 | 说明 |
 |------|------|--------|------|
 | `opkit_compile_file()` | `$output_dir`, `$source_file` | bool | 编译 PHP 文件为 .phpc |
-| `opkit_boot()` | - | mixed | 加载并执行编译后的脚本 |
+| `opkit_compile_dir()` | `$output_dir`, `$dir` | bool | 递归编译目录下所有 .php 文件 |
+| `opkit_boot()` | `$entry`, `$args` | int | 注册符号并执行入口函数 |
 | `opkit_load()` | `$filename` | bool | 加载 .phpc 文件（不执行） |
-| `opkit_get_info()` | `$filename` | array | 获取 .phpc 文件信息 |
-| `opkit_gen_entry_file()` | `$filepath` | bool | 生成入口文件 |
-| `opkit_reset()` | - | void | 重置已加载脚本 |
+| `opkit_load_multi()` | `$filenames` | void | 批量加载 .phpc 文件 |
+| `opkit_get_info()` | `$filename` | ?array | 获取 .phpc 文件信息 |
+| `opkit_gen_entry_file()` | `$output_path` | bool | 生成入口文件 |
+| `opkit_is_loaded()` | `$filename` | bool | 检查 .phpc 文件是否已加载 |
 
 ### 9.2 内部 C 函数
 
@@ -423,6 +430,11 @@ make
 php-src/php-8.4.19/scripts/phpize && \
 ./configure --with-php-config=php-src/php-8.4.19/scripts/php-config && \
 make
+
+# PHP 8.5
+php-src/php-8.5.4/scripts/phpize && \
+./configure --with-php-config=php-src/php-8.5.4/scripts/php-config && \
+make
 ```
 
 ---
@@ -438,12 +450,26 @@ make
 | `03_relative_path.phpt` | 相对路径测试 | 命名空间类支持 |
 | `03_phar_relative_path.phpt` | Phar 相对路径 | Phar + 命名空间 |
 | `04_phar.phpt` | 基础 Phar 加载 | Phar 归档 |
+| `05_triple_des.phpt` | TripleDES 扩展 | 需要 openssl |
 | `06_phpc_tool.phpt` | phpc CLI 工具 | 命令行编译 |
 | `07_constants.phpt` | 常量测试 | 类和常量 |
 | `08_phpc_config.phpt` | 配置文件 | opkit.json |
 | `09_phpc_incremental.phpt` | 增量编译 | mtime 检查 |
+| `10_eval_test.phpt` | eval 测试 | 运行时编译 |
+| `11_main_args.phpt` | 入口参数 | opkit_boot 传参 |
+| `12_load_multi.phpt` | 批量加载 | opkit_load_multi |
+| `13_phpc_phar_readonly.phpt` | Phar 只读错误 | 错误处理 |
+| `14_stubs_support.phpt` | Stub 生成 | --stubs |
+| `15_phpc_analyze.phpt` | 静态分析 | phpc analyze |
+| `16_phpc_phar_adv.phpt` | 高级 Phar | 压缩与签名 |
+| `17_boot_exception.phpt` | 异常处理 | opkit_boot 错误 |
 | `18_property_hooks.phpt` | 属性钩子 | PHP 8.4+ |
 | `19_class_properties.phpt` | 类属性 | 类型属性支持 |
+| `20_constants_comprehensive.phpt` | 全面常量测试 | namespace/define/类常量 |
+| `21_properties_comprehensive.phpt` | 全面属性测试 | 类型/可见性/readonly |
+| `22_constants_properties_integration.phpt` | 集成测试 | 继承/抽象类/常量默认值 |
+| `23_is_loaded.phpt` | 加载检测 | opkit_is_loaded |
+| `24_php85_fcc_const.phpt` | PHP 8.5 FCC 常量 | 第一类可调用对象 |
 
 ### 11.2 测试格式
 
@@ -475,15 +501,15 @@ if (!zend_string_equals(system_id, opkit_system_id)) {
 }
 ```
 
-### 12.2 OPcache 冲突
+### 12.2 OPcache 共存
 
-**OpKit 与 Zend OPcache 严格不兼容**，必须禁用 OPcache：
+**OpKit 可与 Zend OPcache 静默共存**。OpKit 在编译时会临时保存并恢复 `zend_compile_file`，绕过 OPcache 的 `persistent_compile_file` 钩子，编译完成后再恢复原钩子。因此无需禁用 OPcache：
 
 ```ini
 ; 正确配置
+zend_extension=opcache.so
 zend_extension=opkit.so
 phar.readonly=Off
-;zend_extension=opcache.so  <-- 必须注释掉
 ```
 
 ### 12.3 加载限制
@@ -555,7 +581,7 @@ opkit/
 │   ├── COMPILATION_PROCESS.md   # 编译流程详解
 │   └── ZEND_COMPILE_OPTIONS.md  # Zend 编译选项参考
 ├── config.m4                     # Autotools 配置
-└── CLAUDE.md                     # 开发指南
+└── AGENTS.md                     # 开发指南
 ```
 
 ---
@@ -580,8 +606,8 @@ gdb --args php-src/php-8.2.30/sapi/cli/php -d zend_extension=./modules/opkit.so 
 # 检查内存泄漏
 php-src/php-8.2.30/sapi/cli/php -d memory_limit=256M test.php
 
-# 验证 OPcache 是否禁用
-php-src/php-8.2.30/sapi/cli/php -m | grep -i opcache  # 应该无输出
+# 验证 OPcache 是否加载（OpKit 支持与其共存）
+php-src/php-8.2.30/sapi/cli/php -m | grep -i opcache  # 可共存，无需禁用
 ```
 
 ---
