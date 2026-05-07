@@ -56,6 +56,33 @@ zend_extension=opkit.so
 
 > **⚠️ Note**: OpKit coexists with Zend OPcache via deep integration.
 
+### Configuration
+
+INI entries registered by OpKit itself:
+
+| Configuration | Type | Default | Scope | Description |
+|---------------|------|---------|-------|-------------|
+| `opkit.shm_size` | `zend_long` (bytes) | `0` | `PHP_INI_SYSTEM` | Total size of the shared memory segment. `0` disables shared memory and uses process-private heap memory. Values greater than 0 allocate inter-process shared memory via `mmap(MAP_SHARED\|MAP_ANONYMOUS)` for caching `.phpc` script data. |
+
+Related external PHP INI entries that affect OpKit:
+
+| Configuration | Source | Description |
+|---------------|--------|-------------|
+| `zend_extension=opkit.so` | PHP Core | **Must** be loaded as a Zend Extension. Cannot be written as `extension=opkit.so`. |
+| `phar.readonly=Off` | Phar extension | Only required when **creating** Phar archives (e.g. `phpc -p`). Not needed for running `.phpc` files. |
+
+**Configuration examples**:
+
+```ini
+; Default: disable shared memory (recommended for PHP-FPM)
+zend_extension=opkit.so
+opkit.shm_size=0
+
+; Enable 32MB shared memory (recommended for long-running servers)
+zend_extension=opkit.so
+opkit.shm_size=33554432
+```
+
 ---
 
 ## 📖 Quick Start

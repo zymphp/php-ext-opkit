@@ -56,6 +56,33 @@ zend_extension=opkit.so
 
 > **⚠️ 注意**：OpKit 通过深度集成可与 Zend OPcache 静默共存。
 
+### 配置项
+
+OpKit 自身注册的 INI 配置项：
+
+| 配置项 | 类型 | 默认值 | 范围 | 说明 |
+|--------|------|--------|------|------|
+| `opkit.shm_size` | `zend_long`（字节） | `0` | `PHP_INI_SYSTEM` | 共享内存段总容量。`0` 表示禁用共享内存，使用进程私有堆内存；大于 0 时通过 `mmap(MAP_SHARED\|MAP_ANONYMOUS)` 分配进程间共享内存，用于缓存 `.phpc` 脚本数据。 |
+
+相关的外部 PHP 配置项（影响 OpKit 运行）：
+
+| 配置项 | 来源 | 说明 |
+|--------|------|------|
+| `zend_extension=opkit.so` | PHP Core | **必须**作为 Zend Extension 加载。不可写成 `extension=opkit.so`。 |
+| `phar.readonly=Off` | Phar 扩展 | 仅在**创建** Phar 包时需要（如 `phpc -p`）。运行 `.phpc` 文件时不需要。 |
+
+**配置示例**：
+
+```ini
+; 默认配置：禁用共享内存（推荐 PHP-FPM 使用）
+zend_extension=opkit.so
+opkit.shm_size=0
+
+; 开启 32MB 共享内存（推荐常驻内存模型使用）
+zend_extension=opkit.so
+opkit.shm_size=33554432
+```
+
 ---
 
 ## 📖 快速入门
