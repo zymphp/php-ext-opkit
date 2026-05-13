@@ -2,7 +2,7 @@
 
 OpKit (Opcode Toolkit) is an **experimental** Opcode pre-compilation and persistence extension for PHP. Inspired by the architecture of Zend OPcache, it aims to explore offline compilation and persistent storage solutions for PHP source code.
 
-> **⚠️ Warning**: The project is currently in the **early development and testing stage** (Beta). APIs and binary formats may undergo breaking changes in the future. DO NOT use it in critical production environments.
+> **⚠️ Warning**: The project is currently in the **early development and testing stage** (Beta). APIs and binary formats may undergo breaking changes in the future. DO NOT use it in critical production environments. Issues and Pull Requests are welcome.
 
 ## 🚀 Core Features
 
@@ -13,7 +13,7 @@ OpKit (Opcode Toolkit) is an **experimental** Opcode pre-compilation and persist
 - **Constants Support**: Comprehensive cross-request persistence for `define()`, global `const`, and class constants.
 
 ### 2. Automated Build Tool (phpc)
-- **Incremental Compilation**: Intelligently compares source modification times, PHP environment System ID, and binary file Magic value, recompiling only changed or incompatible files, improving build efficiency for large projects.
+- **Incremental Compilation**: Automatically compares source modification times, PHP environment System ID, and binary file Magic value, recompiling only changed or incompatible files, improving build efficiency for large projects.
 - **Configuration-driven**: Supports `opkit.json` for managing tasks, with support for parameter inheritance and overrides.
 - **Concurrency Safety**: Uses atomic writes (temporary files + atomic renaming) and exclusive locks to improve the reliability of the build process.
 - **Performance Profiling**: Built-in profiling feature providing file-level compilation time statistics.
@@ -105,7 +105,7 @@ php -d zend_extension=opkit.so dist/entry.php
 
 ## 💻 Command Line Tool (phpc)
 
-`phpc` is the core build assistance script for OpKit, located at `bin/phpc`.
+`phpc` is the core build script for OpKit, located at `bin/phpc`.
 
 ### Common Command Examples
 
@@ -173,12 +173,12 @@ composer opkit-clean
 
 ## 🔍 IDE Support and Stubs
 
-Since the OpKit API is provided by a C extension, IDEs (like PHPStorm, VSCode) cannot recognize these functions by default. To achieve a perfect auto-completion and static analysis experience, OpKit provides two stub solutions:
+Since the OpKit API is provided by a C extension, IDEs (like PHPStorm, VSCode) cannot recognize these functions by default. To get good auto-completion and static analysis support, OpKit provides two stub solutions:
 
 ### 1. Extension API Stubs (Built-in)
 When installing `zymphp/opkit` via Composer, the built-in stub files of the extension are automatically included in the project. IDEs will recognize core APIs like `opkit_boot` and `opkit_load`.
 
-### 2. Business Code Stubs (Auto-generated)
+### 2. Project Code Stubs (Auto-generated)
 For the `.phpc` binary files you compile, you can use the `phpc --stubs <dir>` command to generate corresponding PHP declaration files for them. This allows static analysis tools (like PHPStan) to process compiled projects just like source code.
 
 ---
@@ -231,9 +231,12 @@ OpKit provides the following technical documentation to help you understand the 
 
 ---
 
+## 👤 Author
+
+Eno-CN <Eno_CN@qq.com>
+
 ## 📜 Credits
 
-- **Author**: Eno-CN <Eno_CN@qq.com>
-- **Assistant**: Developed with help from AI Assistant - Junie.
+- **Assistant**: Developed with assistance from AI Assistants OpenCode and Junie. Models used: Deepseek v4 pro, Kimi K2.6, and others.
 - **Reference**: OpKit is heavily based on [Zend OPcache](https://github.com/php/php-src/tree/master/ext/opcache).
 - **Acknowledgment**: This product includes PHP software, freely available from <http://www.php.net/software/>.

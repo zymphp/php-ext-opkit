@@ -1,8 +1,8 @@
 # OpKit
 
-OpKit (Opcode Toolkit) 是一个处于 **实验阶段** 的 PHP Opcode 预编译与持久化扩展。它参考了 Zend OPcache 的底层架构，旨在探索 PHP 源码的离线编译与持久化存储方案。
+OpKit (Opcode Toolkit) 是一个处于 **实验阶段** 的 PHP Opcode 预编译与持久化扩展。它参考了 Zend OPcache 的底层架构，旨在探索 PHP 源码的离线编译与持久化机制。
 
-> **⚠️ 声明**：目前该项目仍处于 **早期开发与测试阶段**，其 API 和二进制格式在未来可能会发生非兼容性变更。请勿直接用于关键生产环境。
+> **⚠️ 声明**：目前该项目仍处于 **早期开发与测试阶段**，其 API 和二进制格式在未来可能会发生非兼容性变更，请勿直接用于关键生产环境。欢迎试用、提交 Issue 与 Pull Request 参与贡献。
 
 ## 🚀 核心特性
 
@@ -13,7 +13,7 @@ OpKit (Opcode Toolkit) 是一个处于 **实验阶段** 的 PHP Opcode 预编译
 - **常量支持**: 覆盖 `define()`、全局 `const` 以及类常量的跨请求持久化。
 
 ### 2. 自动化构建工具 (phpc)
-- **增量编译**: 智能比对源码修改时间、PHP 环境 System ID 以及二进制文件 Magic 值，仅重编译变动或不兼容的文件，提升大型项目构建效率。
+- **增量编译**: 自动比对源码修改时间、PHP 环境 System ID 以及二进制文件 Magic 值，仅重编译变动或不兼容的文件，提升大型项目构建效率。
 - **配置驱动**: 支持 `opkit.json` 管理任务，支持参数继承与覆盖。
 - **并发安全**: 采用原子性写入（临时文件 + 原子重命名）和排他锁，提高构建过程的可靠性。
 - **性能分析**: 内置 Profiling 功能，提供文件级编译耗时统计。
@@ -22,7 +22,7 @@ OpKit (Opcode Toolkit) 是一个处于 **实验阶段** 的 PHP Opcode 预编译
 
 ### 3. 运行环境与分析
 - **影子分区统计**: 提供 Metadata、Code、Data、Misc 四个分区的内存占用分析，展示资源消耗情况。
-- **共享内存缓存**: 支持通过 `mmap(MAP_SHARED)` 将脚本数据缓存到进程间共享内存，实现多进程（如 PHP-FPM Worker）零拷贝共享，显著降低内存占用和启动延迟。
+- **共享内存缓存**: 支持通过 `mmap(MAP_SHARED)` 将脚本数据缓存到进程间共享内存，实现多进程间（如 PHP-FPM Worker）的零拷贝共享，显著降低内存占用和启动延迟。
 - **SHM 管理**: 提供 `opkit_shm_reset()` 一键清空共享内存缓存，`opkit_shm_stat()` 实时查看共享内存使用统计。
 - **批量加载**: 通过 `opkit_load_multi` 挂载项目的编译产物。
 - **灵活引导**: `opkit_boot` 支持自定义入口函数（默认为 `main`）并支持参数传递。
@@ -32,7 +32,7 @@ OpKit (Opcode Toolkit) 是一个处于 **实验阶段** 的 PHP Opcode 预编译
 
 - **PHP 版本**: 支持 PHP 8.2、8.3、8.4 和 8.5。
 - **构建工具**: 需要安装 `phpize`、`php-config`、`make` 以及 C 编译器（如 `gcc`）。
-- **运行依赖**: OpKit 必须作为 **Zend Extension** 加载。通过深度集成可与 Zend OPcache 静默共存。
+- **运行依赖**: OpKit 必须作为 **Zend Extension** 加载。通过深度集成可与 Zend OPcache 透明共存。
 
 ---
 
@@ -152,7 +152,7 @@ composer require zymphp/opkit
 ```
 
 ### 2. 配置与自动编译
-插件会自动寻找根目录下的 `opkit.json` 进行编译。你只需在 `composer.json` 中配置好该文件，后续的所有安装/更新操作都会自动更新编译产物。
+插件会自动寻找项目根目录下的 `opkit.json` 进行编译。只需确保该文件已正确配置，后续的所有安装/更新操作都会自动更新编译产物。
 
 此外，该插件还提供了以下命令，用于从源码管理扩展：
 
@@ -173,7 +173,7 @@ composer opkit-clean
 
 ## 🔍 IDE 支持与存根 (Stubs)
 
-由于 OpKit 的 API 是由 C 扩展提供的，IDE（如 PHPStorm, VSCode）默认无法识别这些函数。为了获得完美的自动补全和静态分析体验，OpKit 提供了两种存根方案：
+由于 OpKit 的 API 由 C 扩展提供，IDE（如 PHPStorm、VSCode）默认无法识别这些函数。为获得良好的自动补全与静态分析体验，OpKit 提供了两种存根方案：
 
 ### 1. 扩展 API 存根 (内置)
 当通过 Composer 安装 `zymphp/opkit` 后，扩展自带的存根文件会自动包含在项目中。IDE 将能够识别 `opkit_boot`、`opkit_load` 等核心 API。
@@ -189,7 +189,7 @@ OpKit 提供以下技术文档，帮助深入了解系统实现：
 
 | 文档 | 说明 |
 |------|------|
-| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | 系统架构概览，包含模块职责、数据结构、内存管理和 PHP 版本兼容性说明 |
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | 系统架构概览，包含各模块职责、数据结构、内存管理和 PHP 版本兼容性说明 |
 | [PHPC_FILE_FORMAT.md](docs/PHPC_FILE_FORMAT.md) | `.phpc` 文件格式规范，详细描述文件头结构、序列化机制和反序列化流程 |
 | [COMPILATION_PROCESS.md](docs/COMPILATION_PROCESS.md) | 编译流程详解，包含编译时和运行时的完整流程 |
 | [ZEND_COMPILE_OPTIONS.md](docs/ZEND_COMPILE_OPTIONS.md) | Zend 编译选项参考，用于调试和优化 |
@@ -231,9 +231,12 @@ OpKit 提供以下技术文档，帮助深入了解系统实现：
 
 ---
 
-## 📜 Credits
+## 👤 作者
 
-- **Author**: Eno-CN <Eno_CN@qq.com>
-- **Assistant**: Developed with help from AI Assistant – Junie.
-- **Reference**: OpKit is heavily based on [Zend OPcache](https://github.com/php/php-src/tree/master/ext/opcache).
-- **Acknowledgment**: This product includes PHP software, freely available from <http://www.php.net/software/>.
+Eno-CN <Eno_CN@qq.com>
+
+## 📜 致谢
+
+- **AI 助手**：在 OpenCode、Junie 等 AI 助手的协助下完成开发。使用模型包括 Deepseek v4 pro、Kimi K2.6 等。
+- **参考**：OpKit 大量参考并基于 [Zend OPcache](https://github.com/php/php-src/tree/master/ext/opcache) 实现。
+- **声明**：本产品包含 PHP 软件，可自由从 <http://www.php.net/software/> 获取。
