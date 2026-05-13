@@ -279,7 +279,7 @@ static bool opkit_do_compile_file(zend_string *output_path, zend_string *script_
 	zend_file_handle file_handle;
 	zend_op_array *op_array = NULL;
 	zend_execute_data *orig_execute_data = NULL;
-	uint32_t orig_compiler_options;
+	volatile uint32_t orig_compiler_options;
 	zend_persistent_script *persistent_script;
 	bool success = false;
 

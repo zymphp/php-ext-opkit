@@ -1576,8 +1576,8 @@ zend_persistent_script *opkit_compile_file(zend_file_handle *file_handle, int ty
 	zend_op_array *orig_active_op_array;
 	zval orig_user_error_handler;
 	zend_op_array *op_array;
-	bool do_bailout = false;
-	uint32_t orig_compiler_options = 0;
+	volatile bool do_bailout = false;
+	volatile uint32_t orig_compiler_options = 0;
 
 	/* Try to open file */
 	if (file_handle->type == ZEND_HANDLE_FILENAME) {
