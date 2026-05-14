@@ -159,12 +159,12 @@ static zend_ast *zend_persist_ast(zend_ast *ast)
 	uint32_t i;
 
 	if (ast->kind == ZEND_AST_ZVAL || ast->kind == ZEND_AST_CONSTANT) {
-		zend_ast_zval *copy = zend_shared_memdup_put_free(ast, sizeof(zend_ast_zval));
+		zend_ast_zval *copy = zend_shared_memdup_put(ast, sizeof(zend_ast_zval));
 		zend_persist_zval(&copy->val);
 		ast = (zend_ast *)copy;
 	} else if (zend_ast_is_list(ast)) {
 		zend_ast_list *list = zend_ast_get_list(ast);
-		zend_ast_list *copy = zend_shared_memdup_put_free(ast, sizeof(zend_ast_list) + sizeof(zend_ast *) * (list->children - 1));
+		zend_ast_list *copy = zend_shared_memdup_put(ast, sizeof(zend_ast_list) + sizeof(zend_ast *) * (list->children - 1));
 		for (i = 0; i < list->children; i++) {
 			if (copy->child[i]) {
 				copy->child[i] = zend_persist_ast(copy->child[i]);
@@ -185,9 +185,17 @@ static zend_ast *zend_persist_ast(zend_ast *ast)
 	} else if (zend_ast_is_decl(ast)) {
 		ZEND_UNREACHABLE();
 #endif
+	} else if (ast->kind == ZEND_AST_CONST_ENUM_INIT) {
+		zend_ast *copy = zend_shared_memdup_put(ast, sizeof(zend_ast) + sizeof(zend_ast *) * 2);
+		for (i = 0; i < 3; i++) {
+			if (copy->child[i]) {
+				copy->child[i] = zend_persist_ast(copy->child[i]);
+			}
+		}
+		ast = copy;
 	} else {
 		uint32_t children = zend_ast_get_num_children(ast);
-		zend_ast *copy = zend_shared_memdup_put_free(ast, sizeof(zend_ast) + sizeof(zend_ast *) * (children - 1));
+		zend_ast *copy = zend_shared_memdup_put(ast, sizeof(zend_ast) + sizeof(zend_ast *) * (children - 1));
 		for (i = 0; i < children; i++) {
 			if (copy->child[i]) {
 				copy->child[i] = zend_persist_ast(copy->child[i]);
@@ -255,7 +263,7 @@ static void zend_persist_zval(zval *z)
 				 * (allocated on the ZendMM heap, no children in the arena).
 				 * Complex ASTs (ZEND_AST_CLASS_CONST etc.) have children that
 				 * point to freed arena memory and cannot be persisted safely. */
-				if (ast->kind == ZEND_AST_ZVAL || ast->kind == ZEND_AST_CONSTANT) {
+				if (ast->kind == ZEND_AST_ZVAL || ast->kind == ZEND_AST_CONSTANT || ast->kind == ZEND_AST_CONST_ENUM_INIT) {
 					Z_AST_P(z) = zend_shared_memdup_put(old_ref, sizeof(zend_ast_ref));
 					zend_persist_ast(ast);
 				} else {

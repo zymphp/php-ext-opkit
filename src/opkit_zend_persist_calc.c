@@ -108,6 +108,13 @@ static void zend_persist_ast_calc(zend_ast *ast)
 	} else if (zend_ast_is_decl(ast)) {
 		ZEND_UNREACHABLE();
 #endif
+	} else if (ast->kind == ZEND_AST_CONST_ENUM_INIT) {
+		ADD_SIZE_MS(sizeof(zend_ast) + sizeof(zend_ast *) * 2);
+		for (i = 0; i < 3; i++) {
+			if (ast->child[i]) {
+				zend_persist_ast_calc(ast->child[i]);
+			}
+		}
 	} else {
 		uint32_t children = zend_ast_get_num_children(ast);
 		ADD_SIZE_MS(zend_ast_size(children));

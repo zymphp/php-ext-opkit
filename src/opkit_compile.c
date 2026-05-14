@@ -1583,15 +1583,9 @@ zend_persistent_script *opkit_compile_script_load(zend_string *filename)
 #if PHP_VERSION_ID >= 80100
 static zend_ast_ref *opkit_copy_ast_ref(zend_ast *ast)
 {
-	uint32_t children = zend_ast_get_num_children(ast);
+	uint32_t children = (ast->kind == ZEND_AST_CONST_ENUM_INIT) ? 3 : zend_ast_get_num_children(ast);
 	size_t ast_size = sizeof(zend_ast) + sizeof(zend_ast *) * (children - 1);
 	size_t total_size = sizeof(zend_ast_ref) + ast_size;
-
-	for (uint32_t i = 0; i < children; i++) {
-		if (ast->child[i] && ast->child[i]->kind == ZEND_AST_ZVAL) {
-			total_size += sizeof(zend_ast_zval);
-		}
-	}
 
 	char *p = emalloc(total_size);
 	zend_ast_ref *ref = (zend_ast_ref *)p;
@@ -1606,18 +1600,14 @@ static zend_ast_ref *opkit_copy_ast_ref(zend_ast *ast)
 	opkit_ast_ref_list = node;
 
 	zend_ast *copy = (zend_ast *)p;
-	p += ast_size;
 	memcpy(copy, ast, ast_size);
 
 	for (uint32_t i = 0; i < children; i++) {
-		if (copy->child[i]) {
-			if (copy->child[i]->kind == ZEND_AST_ZVAL) {
-				zend_ast_zval *child_copy = (zend_ast_zval *)p;
-				p += sizeof(zend_ast_zval);
-				memcpy(child_copy, copy->child[i], sizeof(zend_ast_zval));
-				zval_copy_ctor(&child_copy->val);
-				copy->child[i] = (zend_ast *)child_copy;
-			}
+		if (copy->child[i] && copy->child[i]->kind == ZEND_AST_ZVAL) {
+			zend_ast_zval *child_copy = emalloc(sizeof(zend_ast_zval));
+			memcpy(child_copy, copy->child[i], sizeof(zend_ast_zval));
+			zval_copy_ctor(&child_copy->val);
+			copy->child[i] = (zend_ast *)child_copy;
 		}
 	}
 
@@ -1627,6 +1617,14 @@ static zend_ast_ref *opkit_copy_ast_ref(zend_ast *ast)
 static int opkit_update_constant_safe(zval *zv, zend_class_entry *scope)
 {
 	if (Z_TYPE_P(zv) != IS_CONSTANT_AST) {
+		return SUCCESS;
+	}
+
+	zend_ast *ast = Z_ASTVAL_P(zv);
+
+	if (ast->kind == ZEND_AST_CONST_ENUM_INIT) {
+		zend_ast_ref *ref = opkit_copy_ast_ref(ast);
+		ZVAL_AST(zv, ref);
 		return SUCCESS;
 	}
 
@@ -2003,8 +2001,17 @@ static void opkit_free_ast_ref_list(void)
 	while (opkit_ast_ref_list) {
 		opkit_ast_ref_node *node = opkit_ast_ref_list;
 		opkit_ast_ref_list = node->next;
-		zend_ast_destroy(GC_AST(node->ref));
-		efree(node->ref);
+		zend_ast_ref *ref = node->ref;
+		zend_ast *ast = GC_AST(ref);
+		if (ast->kind == ZEND_AST_CONST_ENUM_INIT) {
+			for (uint32_t i = 0; i < 3; i++) {
+				if (ast->child[i] && ast->child[i]->kind == ZEND_AST_ZVAL) {
+					zval_ptr_dtor_nogc(zend_ast_get_zval(ast->child[i]));
+					efree(ast->child[i]);
+				}
+			}
+		}
+		efree(ref);
 		efree(node);
 	}
 }
