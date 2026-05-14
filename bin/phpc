@@ -185,7 +185,7 @@ if ($can_compile) {
                     }
                     $file_start = microtime(true);
                     try {
-                        if (opkit_compile_file($abs_output, $src_file)) {
+                        if (opkit_compile_file($abs_output, $src_file, $abs_src)) {
                             $duration = microtime(true) - $file_start;
                             echo sprintf("[COMPILE] %s (%.3fs)\n", $rel_path, $duration);
                             $count++;
@@ -220,7 +220,7 @@ if ($can_compile) {
         if ($should_compile) {
             $file_start = microtime(true);
             try {
-                if (opkit_compile_file($abs_output, $abs_src)) {
+                if (opkit_compile_file($abs_output, $abs_src, dirname($abs_src))) {
                     $duration = microtime(true) - $file_start;
                     echo sprintf("[COMPILE] %s (%.3fs)\n", basename($abs_src), $duration);
                     $count++;
