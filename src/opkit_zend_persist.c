@@ -269,6 +269,18 @@ static void zend_persist_zval(zval *z)
 					Z_TYPE_FLAGS_P(z) = 0;
 					GC_SET_REFCOUNT(Z_COUNTED_P(z), 1);
 					GC_ADD_FLAGS(Z_COUNTED_P(z), GC_IMMUTABLE);
+					/* Free heap-allocated child nodes that zend_persist_ast
+					 * copied to shared memory but did not free. opkit_copy_ast_ref
+					 * allocated these via emalloc(). Must be done before efree(old_ref)
+					 * which frees the parent allocation containing the child pointers. */
+					if (ast->kind == ZEND_AST_CONST_ENUM_INIT) {
+						for (uint32_t i = 0; i < 3; i++) {
+							if (ast->child[i] && ast->child[i]->kind == ZEND_AST_ZVAL) {
+								zval_ptr_dtor_nogc(zend_ast_get_zval(ast->child[i]));
+								efree(ast->child[i]);
+							}
+						}
+					}
 					efree(old_ref);
 				} else {
 					ZVAL_NULL(z);

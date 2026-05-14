@@ -2058,8 +2058,9 @@ static void opkit_free_ast_ref_list(void)
 /* Clear the AST ref tracking list without freeing the underlying AST refs.
  * Called after zend_accel_script_persist(), which already handles copying AST
  * refs to persistent memory and freeing the heap originals via
- * zend_persist_zval() -> efree(old_ref). Re-freeing them here would be a
- * use-after-free. */
+ * zend_persist_zval() -> efree(old_ref). However, the AST child nodes
+ * (zend_ast_zval) allocated by opkit_copy_ast_ref are NOT freed by persist,
+ * so we must free them here. */
 static void opkit_clear_ast_ref_list(void)
 {
 	while (opkit_ast_ref_list) {

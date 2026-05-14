@@ -200,6 +200,11 @@ if ($can_compile) {
         });
     }
 
+    // Snapshot global table counts for later cleanup. Autoloaded
+    // dependencies accumulate in CG(class_table) etc. during batch
+    // compilation but are not moved by zend_accel_move_user_*.
+    opkit_globals_mark();
+
     $count = 0;
     $skipped = 0;
     $failed = 0;
@@ -293,6 +298,9 @@ if ($can_compile) {
     if ($failed > 0) {
         exit(1);
     }
+
+    // Clean up autoloaded entries in global tables
+    opkit_globals_cleanup();
 
     // 4. Stubs Generation Mode (can be triggered after compilation)
     if ($stubs_dir) {

@@ -69,6 +69,11 @@ typedef struct _opkit_link_error {
 	const char *name;
 } opkit_link_error;
 
+/* Static variables for opkit_globals_mark/cleanup */
+static uint32_t opkit_marked_func_count = 0;
+static uint32_t opkit_marked_class_count = 0;
+static uint32_t opkit_marked_const_count = 0;
+
 /* Forward declarations for class linking functions */
 static zend_result opkit_resolve_class_deps(opkit_link_error *error, const zend_class_entry *ce);
 static void opkit_link_classes(void);
@@ -1818,6 +1823,57 @@ ZEND_FUNCTION(opkit_shm_stat) {
 	add_assoc_long(return_value, "used", (zend_long)(OPKIT_G(shm_size) - opkit_shared_alloc_get_free_memory()));
 }
 
+/* Snapshot current global table counts for later cleanup */
+ZEND_FUNCTION(opkit_globals_mark)
+{
+	if (zend_parse_parameters_none() == FAILURE) {
+		RETURN_THROWS();
+	}
+	opkit_marked_func_count = CG(function_table)->nNumUsed;
+	opkit_marked_class_count = CG(class_table)->nNumUsed;
+	opkit_marked_const_count = EG(zend_constants)->nNumUsed;
+	RETURN_TRUE;
+}
+
+/* Clean up global table entries added since opkit_globals_mark().
+ * Removes autoloaded classes/functions/constants that accumulated
+ * during batch compilation but were not moved to persistent scripts. */
+ZEND_FUNCTION(opkit_globals_cleanup)
+{
+	if (zend_parse_parameters_none() == FAILURE) {
+		RETURN_THROWS();
+	}
+
+	/* Directly delete buckets. zend_hash_del_bucket calls the table's
+	 * destructor (e.g. ZEND_CLASS_DTOR, ZEND_FUNCTION_DTOR) which
+	 * properly frees each entry. The saved destructor is preserved. */
+	if (CG(function_table)->nNumUsed > opkit_marked_func_count) {
+		uint32_t i = CG(function_table)->nNumUsed;
+		while (i-- > opkit_marked_func_count) {
+			Bucket *b = CG(function_table)->arData + i;
+			if (Z_TYPE(b->val) != IS_UNDEF) zend_hash_del_bucket(CG(function_table), b);
+		}
+		CG(function_table)->nNumUsed = opkit_marked_func_count;
+	}
+	if (CG(class_table)->nNumUsed > opkit_marked_class_count) {
+		uint32_t i = CG(class_table)->nNumUsed;
+		while (i-- > opkit_marked_class_count) {
+			Bucket *b = CG(class_table)->arData + i;
+			if (Z_TYPE(b->val) != IS_UNDEF) zend_hash_del_bucket(CG(class_table), b);
+		}
+		CG(class_table)->nNumUsed = opkit_marked_class_count;
+	}
+	if (EG(zend_constants)->nNumUsed > opkit_marked_const_count) {
+		uint32_t i = EG(zend_constants)->nNumUsed;
+		while (i-- > opkit_marked_const_count) {
+			Bucket *b = EG(zend_constants)->arData + i;
+			if (Z_TYPE(b->val) != IS_UNDEF) zend_hash_del_bucket(EG(zend_constants), b);
+		}
+		EG(zend_constants)->nNumUsed = opkit_marked_const_count;
+	}
+	RETURN_TRUE;
+}
+
 static const zend_function_entry opkit_functions[] = {
 	ZEND_FE(opkit_compile_file, arginfo_opkit_compile_file)
 	ZEND_FE(opkit_compile_dir, arginfo_opkit_compile_dir)
@@ -1829,6 +1885,8 @@ static const zend_function_entry opkit_functions[] = {
 	ZEND_FE(opkit_is_loaded, arginfo_opkit_is_loaded)
 	ZEND_FE(opkit_shm_reset, arginfo_opkit_shm_reset)
 	ZEND_FE(opkit_shm_stat, arginfo_opkit_shm_stat)
+	ZEND_FE(opkit_globals_mark, arginfo_opkit_globals_mark)
+	ZEND_FE(opkit_globals_cleanup, arginfo_opkit_globals_cleanup)
 	ZEND_FE_END
 };
 

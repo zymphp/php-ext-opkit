@@ -64,4 +64,16 @@ if (!extension_loaded('opkit')) {
      * @return bool True if the file is loaded, false otherwise
      */
     function opkit_is_loaded(string $filename): bool {}
+
+    /**
+     * Snapshot current global table counts for later cleanup
+     * @return bool
+     */
+    function opkit_globals_mark(): bool {}
+
+    /**
+     * Purge global table entries added since the last opkit_globals_mark() call
+     * @return bool
+     */
+    function opkit_globals_cleanup(): bool {}
 }
