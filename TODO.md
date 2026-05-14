@@ -134,3 +134,19 @@
 - ~~问题: `opkit_compile_file` 编译每个文件后将类/函数从全局表中 `zend_accel_move_user_*` 移出，导致后续文件编译时找不到之前的类~~
 - ~~影响: neuron-core 编译时 11 个文件报 Class not found~~
 - 修复: `bin/phpc` 编译前预扫描所有源文件构建 FQCN→路径映射，注册 `spl_autoload_register`。编译期间遇到未知类时，autoloader 调用 `require_once` 加载依赖文件，类被注册到 `CG(class_table)` 后主编译继续。无需改动 C 代码
+
+### 🟢 已知限制 (2026-05-14)
+
+**CLI 编译进程内存泄漏**
+- 现象: `phpc` 批量编译 360 个文件后有 ~572 个 ZendMM 内部泄漏（~100KB）
+- 来源: autoloader 的 `require_once` 触发 PHP 原始编译器，产生的字符串/AST 分配未在 OpKit 清理路径中释放
+- 影响: 仅 CLI 编译进程，运行时加载 `.phpc` 无泄漏；进程退出后 OS 回收
+- 降低措施: 新增 `opkit_globals_mark/cleanup` PHP 函数在编译结束后清理全局表；`zend_persist_zval` 释放 enum AST 堆子节点
+
+### 已修复 (2026-05-14 #3) —— 跨文件依赖自动加载
+
+**✅ phpc autoloader**
+- 问题: 跨文件类/枚举引用导致 "Class not found" 编译失败
+- 修复: `bin/phpc` 编译前预扫描源文件，`extract_fqcn()` 提取命名空间+类名，构建映射表，注册 `spl_autoload_register`
+- 新增: `opkit_globals_mark()` / `opkit_globals_cleanup()` PHP 函数，清理 autoloader 引入的全局表条目
+- 新增: `zend_persist_zval` 在持久化后 `efree` enum AST 的 `zend_ast_zval` 堆子节点

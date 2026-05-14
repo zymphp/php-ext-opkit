@@ -29,10 +29,10 @@ Test results (2026-05-14): **0 failing across PHP 8.2/8.3/8.4/8.5** (100% of non
 
 | PHP | Pass | Skip | Fail | Rate |
 |-----|------|------|------|------|
-| 8.2 | 26 | 5 | 0 | 100% |
-| 8.3 | 26 | 5 | 0 | 100% |
-| 8.4 | 27 | 4 | 0 | 100% |
-| 8.5 | 28 | 3 | 0 | 100% |
+| 8.2 | 29 | 5 | 0 | 100% |
+| 8.3 | 29 | 5 | 0 | 100% |
+| 8.4 | 30 | 4 | 0 | 100% |
+| 8.5 | 31 | 3 | 0 | 100% |
 
 Skipped: `05_triple_des.phpt` (requires openssl), `18_property_hooks.phpt` (PHP 8.4+), `24_php85_fcc_const.phpt` (PHP 8.5+), `27_fork_shm.phpt`/`29_shm_reset_fork.phpt` (requires pcntl).
 
@@ -49,6 +49,14 @@ Remaining edge cases:
 - Constants referencing other constants from a different file (not yet loaded)
 
 OpKit previously used `ZEND_COMPILE_NO_CONSTANT_SUBSTITUTION` (matching OPcache) but this prevented PHP's `pass_two()` from resolving these ASTs at compile time. Removing this flag allows most constant expressions to resolve correctly, but some edge cases remain.
+
+## Cross-file Class Dependencies
+
+When compiling multiple files in batch (`phpc -s src/ -o dist/`), each file is compiled independently. Classes from previously compiled files are removed from `CG(class_table)` by `zend_accel_move_user_classes()`, so subsequent files cannot find them. The phpc tool solves this by pre-scanning all source files, building a FQCN-to-path map, and registering `spl_autoload_register()`. When the compiler encounters an unknown class, the autoloader `require_once`s the dependency file, registering its classes in `CG(class_table)` before the main compilation continues.
+
+Two new PHP functions support cleanup after batch compilation:
+- `opkit_globals_mark()` — snapshot global table counts before batch
+- `opkit_globals_cleanup()` — purge autoloaded entries after batch
 
 ## Loading the Extension
 
