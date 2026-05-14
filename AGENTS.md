@@ -25,20 +25,24 @@ php-src/php-8.5.4/sapi/cli/php -d zend_extension=$(pwd)/modules/opkit.so \
 Tests use `.phpt` format. Check failures in `tests/*.diff` and `tests/*.out`.
 `ext/opkit/tests/` is empty; real tests are in root `tests/`.
 
-Test results (2026-05-06): **0 failing across PHP 8.2/8.3/8.4/8.5** (100% of non-skipped).
+Test results (2026-05-14): **0 failing across PHP 8.2/8.3/8.4/8.5** (100% of non-skipped).
 
 | PHP | Pass | Skip | Fail | Rate |
 |-----|------|------|------|------|
-| 8.2 | 22 | 3 | 0 | 100% |
-| 8.3 | 22 | 3 | 0 | 100% |
-| 8.4 | 23 | 2 | 0 | 100% |
-| 8.5 | 24 | 1 | 0 | 100% |
+| 8.2 | 26 | 5 | 0 | 100% |
+| 8.3 | 26 | 5 | 0 | 100% |
+| 8.4 | 27 | 4 | 0 | 100% |
+| 8.5 | 28 | 3 | 0 | 100% |
 
-Skipped: `05_triple_des.phpt` (requires openssl), `18_property_hooks.phpt` (PHP 8.4+), `24_php85_fcc_const.phpt` (PHP 8.5+).
+Skipped: `05_triple_des.phpt` (requires openssl), `18_property_hooks.phpt` (PHP 8.4+), `24_php85_fcc_const.phpt` (PHP 8.5+), `27_fork_shm.phpt`/`29_shm_reset_fork.phpt` (requires pcntl).
 
 ## Architecture Limitation
 
-PHP's compiler arena (`ast_arena`) is destroyed by `zend_compile()` before OpKit's persistence runs. To prevent dangling arena pointers, `opkit_compile_file()` now pre-resolves all `IS_CONSTANT_AST` values in class properties, class constants, and op_array literals by calling `zval_update_constant_ex()` after registering file-level constants in `EG(zend_constants)`. This converts constant references to their resolved values before the persist phase, eliminating both stale AST pointer access and memory leaks.
+PHP's compiler arena (`ast_arena`) is destroyed by `zend_compile()` before OpKit's persistence runs. To prevent dangling arena pointers, `opkit_compile_file()` pre-resolves all `IS_CONSTANT_AST` values in class properties, class constants, and op_array literals by calling `opkit_update_constant_safe()` after registering file-level constants in `EG(zend_constants)`. This converts constant references to their resolved values before the persist phase, eliminating both stale AST pointer access and memory leaks.
+
+For `ZEND_AST_CONST_ENUM_INIT` (enum cases), `zval_update_constant_ex()` is unsafe during compilation because the class may not be fully linked yet, causing `zend_lookup_class()` to return NULL and trigger a SIGSEGV in `zend_enum_new()`. Instead, `opkit_update_constant_safe()` copies the AST from the compiler arena to the heap via `opkit_copy_ast_ref()`, allowing the persist phase to serialize it safely. At runtime, when the class is linked, PHP resolves the AST normally. Heap-allocated AST refs are tracked in `opkit_ast_ref_list` and freed in bulk after persistence (or on failure).
+
+After `zend_accel_script_persist()`, `zend_persist_op_array_ex` frees opcodes/arg_info/etc via `_opkit_shared_memdup_put_free_*()`, but leaves `dynamic_func_defs`, `static_variables` HashTable structure, and heap AST refs behind. OpKit collects all op_array pointers before persistence (`opkit_collect_op_arrays`) and cleans up these remaining resources afterward (`opkit_destroy_op_array_safe` + `opkit_free_ast_ref_list`), preventing memory leaks in large codebases.
 
 Remaining edge cases:
 - Class constant array keys using `self::CONST` where the class isn't fully linked at resolve time
@@ -101,7 +105,7 @@ Four shadow partitions, sized with macros then allocated as one block via `ZCG(m
 ## Conventions
 
 - C version guards: `#if PHP_VERSION_ID >= 80400` / `80300` / else (8.2).
-- `doc_comment` was removed from `zend_property_info` in PHP 8.4.
+- `doc_comment` was removed from `zend_property_info` in PHP 8.4, but still exists in `zend_op_array`, `zend_class_constant`, and `zend_class_entry` (moved out of `info.user` union in 8.4+).
 - Property hooks (`hooks[i]`): save original pointer before `SERIALIZE_PTR`, use saved pointer to serialize each hook. On persist, set `hook->prop_info = copy` before calling `zend_persist_op_array_ex`.
 - `/tmp/` is gitignored — use it for throwaway test scripts.
 - `AI_DEV_ENV.md` is gitignored (machine-specific paths). `AI_GUIDELINES.md` contains version-agnostic conventions (now merged into this file).

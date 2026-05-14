@@ -353,7 +353,9 @@ OpKit 使用指针偏移量序列化技术将内存结构持久化到文件：
 
 | 特性 | PHP 8.2/8.3 | PHP 8.4+ |
 |------|-------------|----------|
-| `doc_comment` | 存在于 `zend_property_info` | 已移除 |
+| `doc_comment` in `zend_property_info` | 存在 | 已移除 |
+| `doc_comment` in `zend_op_array` / `zend_class_constant` | 存在 | 存在 |
+| `doc_comment` in `zend_class_entry` | `ce->info.user.doc_comment` | `ce->doc_comment` (移出 union) |
 | Property Hooks | 不支持 | 支持 (2 种钩子: get, set) |
 | `prop_info` | 不存在于 `zend_op_array` | 存在 |
 | Runtime Cache | 堆分配时需要手动清理 | 堆分配时需要手动清理 |

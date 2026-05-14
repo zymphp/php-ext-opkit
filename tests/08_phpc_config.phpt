@@ -55,7 +55,7 @@ Running phpc with config...
 --------------------------------------------------
 OpKit is compiling (incremental mode)...
 PHP Version: %s
-Sources: %s/src
+Source: %s/src
 Output: %s/out
 --------------------------------------------------
 [COMPILE] test.php (%fs)

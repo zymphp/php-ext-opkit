@@ -24,7 +24,7 @@
 */
 
 /** Compile a PHP file into an OpKit Opcode file */
-function opkit_compile_file(string $output_path, string $filename): bool {}
+function opkit_compile_file(string $output_path, string $filename, ?string $base_path = null): bool {}
 
 /** Compile an entire directory into OpKit Opcode files */
 function opkit_compile_dir(string $output_path, string $dir): bool {}

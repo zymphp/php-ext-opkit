@@ -30,15 +30,9 @@
  *
  * Usage:
  * php phpc -s <source_dir_or_file> -o <output_dir>
- * php phpc -s src/ -s lib/ -o bin/   (multiple sources)
  *
  * Example:
  * php phpc -s src/ -o bin/
- *
- * Config (opkit.json):
- *   src: string or array of source paths (supports glob wildcards)
- *   output: output directory
- *   exclude: array of glob patterns to skip
  */
 
 if (PHP_SAPI !== 'cli') {
@@ -59,19 +53,16 @@ if (isset($options['h']) || isset($options['help'])) {
 
 // Default configuration loading
 $config_file = $options['c'] ?? $options['config'] ?? 'opkit.json';
-$config_dir = null;
 $config = [];
 if (file_exists($config_file)) {
     $json = file_get_contents($config_file);
     if ($json) {
         $config = json_decode($json, true) ?: [];
     }
-    // Config paths are relative to config file's directory
-    $config_dir = dirname(realpath($config_file));
 }
 
 // Parameter merging: CLI priority highest > Configuration file > Default values
-$src_raw = $options['s'] ?? $options['src'] ?? $config['src'] ?? null;
+$src = $options['s'] ?? $options['src'] ?? $config['src'] ?? null;
 $output = $options['o'] ?? $options['output'] ?? $config['output'] ?? null;
 $info_file = $options['i'] ?? $options['info'] ?? null;
 $phar_file = $options['p'] ?? $options['phar'] ?? $config['phar'] ?? null;
@@ -83,15 +74,6 @@ $analyze_path = $options['a'] ?? $options['analyze'] ?? null;
 $compress = $options['z'] ?? $options['compress'] ?? $config['compress'] ?? null;
 $sign = $options['sign'] ?? $config['sign'] ?? null;
 $sign_key = $options['sign-key'] ?? $config['sign-key'] ?? null;
-
-// Normalize src to array for multi-path support
-$src_paths = [];
-if ($src_raw !== null) {
-    foreach ((array)$src_raw as $p) {
-        $src_paths[] = $p;
-    }
-}
-$exclude_patterns = (array)($config['exclude'] ?? []);
 
 // Handle subcommands (like phpc analyze <path>)
 if (isset($argv[1]) && !str_starts_with($argv[1], '-')) {
@@ -115,7 +97,7 @@ if ($info_file) {
 }
 
 // Check mode logic
-$can_compile = (!empty($src_paths) && $output);
+$can_compile = ($src && $output);
 $can_gen_entry = ($gen_entry || ($can_compile && !$phar_file)); // Auto mode: Generate entry.php in output directory if compiling without packaging
 $can_package = ($phar_file && ($output || is_dir('.')));
 
@@ -132,118 +114,23 @@ if (!$can_compile && !$can_package && !$gen_entry) {
  * but CLI tool users usually expect resolution relative to the Current Working Directory (CWD).
  * Therefore, we manually convert user-input paths to absolute paths before calling extension functions.
  */
-function resolve_absolute($path, $base_dir = null) {
+function resolve_absolute($path) {
     if (strpos($path, '/') === 0 || (strpos($path, ':') === 1 && strpos($path, '\\') === 2)) {
         return $path;
     }
-    $base = $base_dir ?: getcwd();
-    $full = $base . DIRECTORY_SEPARATOR . $path;
+    $cwd = getcwd();
+    $full = $cwd . DIRECTORY_SEPARATOR . $path;
     $real = realpath($full);
     return $real ? $real : $full;
 }
 
-/**
- * Check if a path matches any exclude pattern.
- */
-function is_excluded($path, array $exclude_patterns) {
-    foreach ($exclude_patterns as $pattern) {
-        if (fnmatch($pattern, $path)) {
-            return true;
-        }
-        // Also check basename
-        if (fnmatch($pattern, basename($path))) {
-            return true;
-        }
-    }
-    return false;
-}
-
-/**
- * Expand a source path that may contain glob wildcards.
- * Returns an array of resolved absolute paths.
- */
-function expand_source_path($path, array $exclude_patterns, $base_dir = null) {
-    $abs = resolve_absolute($path, $base_dir);
-
-    // If path contains glob characters, expand
-    if (strpbrk($path, '*?[') !== false) {
-        $matches = glob($abs);
-        if (empty($matches)) {
-            return [];
-        }
-        $result = [];
-        foreach ($matches as $m) {
-            $real = realpath($m);
-            if ($real && !is_excluded($real, $exclude_patterns)) {
-                $result[] = $real;
-            }
-        }
-        return $result;
-    }
-
-    // Plain path
-    if (!file_exists($abs)) {
-        return [];
-    }
-    if (is_excluded($abs, $exclude_patterns)) {
-        return [];
-    }
-    return [$abs];
-}
-
-/**
- * Compile a single PHP file.
- * $count, $skipped, $failed are passed by reference for accumulation.
- */
-function compile_file($src_file, $rel_path, $target_file, $abs_output, $incremental, $force, &$count, &$skipped, &$failed) {
-    $should_compile = true;
-    if ($incremental && !$force && file_exists($target_file)) {
-        if (filemtime($src_file) <= filemtime($target_file)) {
-            $info = opkit_get_info($target_file);
-            if ($info && $info['system_id_match']) {
-                $should_compile = false;
-            }
-        }
-    }
-
-    if ($should_compile) {
-        $target_dir = dirname($target_file);
-        if (!is_dir($target_dir)) {
-            mkdir($target_dir, 0777, true);
-        }
-        $file_start = microtime(true);
-        try {
-            if (opkit_compile_file($abs_output, $src_file)) {
-                $duration = microtime(true) - $file_start;
-                echo sprintf("[COMPILE] %s (%.3fs)\n", $rel_path, $duration);
-                $count++;
-            } else {
-                echo "[FAILED]  $rel_path: Unknown error\n";
-                $failed++;
-            }
-        } catch (Throwable $e) {
-            $duration = microtime(true) - $file_start;
-            echo sprintf("[FAILED]  %s: %s (%.3fs)\n", $rel_path, $e->getMessage(), $duration);
-            $failed++;
-        }
-    } else {
-        $skipped++;
-    }
-}
-
 // 1. Compile Mode
 if ($can_compile) {
-    $abs_output = resolve_absolute($output, $config_dir);
+    $abs_src = resolve_absolute($src);
+    $abs_output = resolve_absolute($output);
 
-    // Expand all source paths (may include globs)
-    $all_sources = [];
-    foreach ($src_paths as $sp) {
-        $expanded = expand_source_path($sp, $exclude_patterns, $config_dir);
-        $all_sources = array_merge($all_sources, $expanded);
-    }
-
-    if (empty($all_sources)) {
-        echo "Error: No source files found matching: " . implode(', ', $src_paths) . "\n";
+    if (!file_exists($abs_src)) {
+        echo "Error: Source path '$src' does not exist (resolved path: $abs_src).\n";
         exit(1);
     }
 
@@ -259,11 +146,8 @@ if ($can_compile) {
     echo "--------------------------------------------------\n";
     echo "OpKit is compiling" . ($incremental ? " (incremental mode)" : "") . ($force ? " [force]" : "") . "...\n";
     echo "PHP Version: " . PHP_VERSION . " (" . PHP_SAPI . ")\n";
-    echo "Sources: " . implode(', ', $all_sources) . "\n";
+    echo "Source: $abs_src\n";
     echo "Output: $abs_output\n";
-    if (!empty($exclude_patterns)) {
-        echo "Exclude: " . implode(', ', $exclude_patterns) . "\n";
-    }
     echo "--------------------------------------------------\n";
 
     $count = 0;
@@ -271,34 +155,86 @@ if ($can_compile) {
     $failed = 0;
     $total_start = microtime(true);
 
-    foreach ($all_sources as $abs_src) {
-        if (is_dir($abs_src)) {
-            // Calculate base directory for relative path computation
-            // For glob-matched dirs like "src/module*", use the dir itself as base
-            $base_dir = $abs_src;
+    if (is_dir($abs_src)) {
+        $it = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($abs_src, RecursiveDirectoryIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::SELF_FIRST
+        );
 
-            $it = new RecursiveIteratorIterator(
-                new RecursiveDirectoryIterator($abs_src, RecursiveDirectoryIterator::SKIP_DOTS),
-                RecursiveIteratorIterator::SELF_FIRST
-            );
-
-            foreach ($it as $file) {
-                if (!$file->isFile() || $file->getExtension() !== 'php') {
-                    continue;
-                }
+        foreach ($it as $file) {
+            if ($file->isFile() && $file->getExtension() === 'php') {
                 $src_file = $file->getRealPath();
-                if (is_excluded($src_file, $exclude_patterns)) {
-                    continue;
-                }
-                $rel_path = substr($src_file, strlen($base_dir) + 1);
+                $rel_path = substr($src_file, strlen($abs_src) + 1);
                 $target_file = $abs_output . DIRECTORY_SEPARATOR . $rel_path . 'c';
 
-                compile_file($src_file, $rel_path, $target_file, $abs_output, $incremental, $force, $count, $skipped, $failed);
+                $should_compile = true;
+                if ($incremental && !$force && file_exists($target_file)) {
+                    // Compare mtime and check system compatibility
+                    if (filemtime($src_file) <= filemtime($target_file)) {
+                        $info = opkit_get_info($target_file);
+                        if ($info && $info['system_id_match']) {
+                            $should_compile = false;
+                        }
+                    }
+                }
+
+                if ($should_compile) {
+                    $target_dir = dirname($target_file);
+                    if (!is_dir($target_dir)) {
+                        mkdir($target_dir, 0777, true);
+                    }
+                    $file_start = microtime(true);
+                    try {
+                        if (opkit_compile_file($abs_output, $src_file)) {
+                            $duration = microtime(true) - $file_start;
+                            echo sprintf("[COMPILE] %s (%.3fs)\n", $rel_path, $duration);
+                            $count++;
+                        } else {
+                            echo "[FAILED]  $rel_path: Unknown error\n";
+                            $failed++;
+                        }
+                    } catch (Throwable $e) {
+                        $duration = microtime(true) - $file_start;
+                        $msg = $e->getMessage();
+                        // Try to extract line number from exception message if available
+                        echo sprintf("[FAILED]  %s: %s (%.3fs)\n", $rel_path, $msg, $duration);
+                        $failed++;
+                    }
+                } else {
+                    $skipped++;
+                }
+            }
+        }
+    } else {
+        $target_file = $abs_output . DIRECTORY_SEPARATOR . basename($abs_src) . 'c';
+        $should_compile = true;
+        if ($incremental && !$force && file_exists($target_file)) {
+            if (filemtime($abs_src) <= filemtime($target_file)) {
+                $info = opkit_get_info($target_file);
+                if ($info && $info['system_id_match']) {
+                    $should_compile = false;
+                }
+            }
+        }
+
+        if ($should_compile) {
+            $file_start = microtime(true);
+            try {
+                if (opkit_compile_file($abs_output, $abs_src)) {
+                    $duration = microtime(true) - $file_start;
+                    echo sprintf("[COMPILE] %s (%.3fs)\n", basename($abs_src), $duration);
+                    $count++;
+                } else {
+                    echo "[FAILED]  " . basename($abs_src) . ": Unknown error\n";
+                    $failed++;
+                }
+            } catch (Throwable $e) {
+                $duration = microtime(true) - $file_start;
+                echo sprintf("[FAILED]  %s: %s (%.3fs)\n", basename($abs_src), $e->getMessage(), $duration);
+                $failed++;
             }
         } else {
-            $rel_path = basename($abs_src);
-            $target_file = $abs_output . DIRECTORY_SEPARATOR . $rel_path . 'c';
-            compile_file($abs_src, $rel_path, $target_file, $abs_output, $incremental, $force, $count, $skipped, $failed);
+            $skipped++;
         }
     }
 
@@ -744,16 +680,14 @@ function generateStubContent($info) {
                     foreach ($class['properties'] as $prop) {
                         $pname = is_array($prop) ? $prop['name'] : $prop;
                         $pflags = is_array($prop) ? ($prop['flags'] ?? $ZEND_ACC_PUBLIC) : $ZEND_ACC_PUBLIC;
-                        $ptype = is_array($prop) ? ($prop['type'] ?? null) : null;
 
                         $prefix = "";
+                        if ($pflags & $ZEND_ACC_STATIC) $prefix .= "static ";
                         if ($pflags & $ZEND_ACC_PRIVATE) $prefix .= "private ";
                         elseif ($pflags & $ZEND_ACC_PROTECTED) $prefix .= "protected ";
                         else $prefix .= "public ";
-                        if ($pflags & $ZEND_ACC_STATIC) $prefix .= "static ";
 
-                        $type_str = $ptype ? "$ptype " : "";
-                        $out .= $indent . "    $prefix$type_str\$$pname;\n";
+                        $out .= $indent . "    $prefix$$pname;\n";
                     }
                 }
                 if (!empty($class['methods'])) {
@@ -856,20 +790,7 @@ function showInfo($file) {
                     if (!empty($class['properties'])) {
                         foreach ($class['properties'] as $prop) {
                             $pname = is_array($prop) ? $prop['name'] : $prop;
-                            $ptype = is_array($prop) ? ($prop['type'] ?? null) : null;
-                            $pflags = is_array($prop) ? ($prop['flags'] ?? 0x01) : 0x01;
-
-                            $prefix = "";
-                            if ($pflags & 0x04) $prefix .= "private ";
-                            elseif ($pflags & 0x02) $prefix .= "protected ";
-                            else $prefix .= "public ";
-                            if ($pflags & 0x10) $prefix .= "static ";
-
-                            if ($ptype) {
-                                echo "      * Property: $prefix$ptype \$$pname\n";
-                            } else {
-                                echo "      * Property: $prefix\$$pname\n";
-                            }
+                            echo "      * Property: $$pname\n";
                         }
                     }
                     if (!empty($class['methods'])) {

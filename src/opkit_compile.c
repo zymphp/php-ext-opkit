@@ -33,12 +33,23 @@
 #include "zend_system_id.h"
 #include "zend_virtual_cwd.h"
 #include "zend_attributes.h"
+#include "zend_enum.h"
 #include "Zend/zend_vm.h"
 
 #include <fcntl.h>
 
 static void *string_pool_base = NULL;
 static zend_string *current_string_pool = NULL;
+
+typedef struct _opkit_ast_ref_node {
+	zend_ast_ref *ref;
+	struct _opkit_ast_ref_node *next;
+} opkit_ast_ref_node;
+static opkit_ast_ref_node *opkit_ast_ref_list = NULL;
+#if PHP_VERSION_ID >= 80100
+static int opkit_update_constant_safe(zval *zv, zend_class_entry *scope);
+#endif
+static void opkit_free_ast_ref_list(void);
 
 #define zend_accel_error(type, ...) zend_error(type, __VA_ARGS__)
 #undef ACCEL_LOG_ERROR
@@ -1492,7 +1503,7 @@ zend_persistent_script *opkit_compile_script_load(zend_string *filename)
 	zend_file_cache_unserialize(script, buf);
 
 	/* Register file-level constants from the loaded script into EG(zend_constants)
-	 * so that zval_update_constant_ex() can resolve constant references
+	 * so that opkit_update_constant_safe() can resolve constant references
 	 * (e.g. DEFAULT_NAME used as default property/parameter value). */
 	{
 		zend_constant *zc;
@@ -1528,7 +1539,7 @@ zend_persistent_script *opkit_compile_script_load(zend_string *filename)
 							prop = ce->properties_info_table[i];
 						}
 						zend_class_entry *scope = prop ? prop->ce : ce;
-						if (UNEXPECTED(zval_update_constant_ex(val, scope) != SUCCESS)) {
+						if (UNEXPECTED(opkit_update_constant_safe(val, scope) != SUCCESS)) {
 							/* Failed to resolve - leave as is */
 						}
 					}
@@ -1544,7 +1555,7 @@ zend_persistent_script *opkit_compile_script_load(zend_string *filename)
 				val = ce->default_static_members_table + ce->default_static_members_count - 1;
 				while (count) {
 					if (Z_TYPE_P(val) == IS_CONSTANT_AST) {
-						if (UNEXPECTED(zval_update_constant_ex(val, ce) != SUCCESS)) {
+						if (UNEXPECTED(opkit_update_constant_safe(val, ce) != SUCCESS)) {
 							/* Failed to resolve - leave as is */
 						}
 					}
@@ -1558,7 +1569,7 @@ zend_persistent_script *opkit_compile_script_load(zend_string *filename)
 			ZEND_HASH_FOREACH_PTR(&ce->constants_table, c) {
 				val = &c->value;
 				if (Z_TYPE_P(val) == IS_CONSTANT_AST) {
-					if (UNEXPECTED(zval_update_constant_ex(val, c->ce) != SUCCESS)) {
+					if (UNEXPECTED(opkit_update_constant_safe(val, c->ce) != SUCCESS)) {
 						/* Failed to resolve - leave as is */
 					}
 				}
@@ -1568,6 +1579,62 @@ zend_persistent_script *opkit_compile_script_load(zend_string *filename)
 
 	return script;
 }
+
+#if PHP_VERSION_ID >= 80100
+static zend_ast_ref *opkit_copy_ast_ref(zend_ast *ast)
+{
+	uint32_t children = zend_ast_get_num_children(ast);
+	size_t ast_size = sizeof(zend_ast) + sizeof(zend_ast *) * (children - 1);
+	size_t total_size = sizeof(zend_ast_ref) + ast_size;
+
+	for (uint32_t i = 0; i < children; i++) {
+		if (ast->child[i] && ast->child[i]->kind == ZEND_AST_ZVAL) {
+			total_size += sizeof(zend_ast_zval);
+		}
+	}
+
+	char *p = emalloc(total_size);
+	zend_ast_ref *ref = (zend_ast_ref *)p;
+	p += sizeof(zend_ast_ref);
+
+	GC_SET_REFCOUNT(ref, 2);
+	GC_TYPE_INFO(ref) = GC_CONSTANT_AST;
+
+	opkit_ast_ref_node *node = emalloc(sizeof(opkit_ast_ref_node));
+	node->ref = ref;
+	node->next = opkit_ast_ref_list;
+	opkit_ast_ref_list = node;
+
+	zend_ast *copy = (zend_ast *)p;
+	p += ast_size;
+	memcpy(copy, ast, ast_size);
+
+	for (uint32_t i = 0; i < children; i++) {
+		if (copy->child[i]) {
+			if (copy->child[i]->kind == ZEND_AST_ZVAL) {
+				zend_ast_zval *child_copy = (zend_ast_zval *)p;
+				p += sizeof(zend_ast_zval);
+				memcpy(child_copy, copy->child[i], sizeof(zend_ast_zval));
+				zval_copy_ctor(&child_copy->val);
+				copy->child[i] = (zend_ast *)child_copy;
+			}
+		}
+	}
+
+	return ref;
+}
+
+static int opkit_update_constant_safe(zval *zv, zend_class_entry *scope)
+{
+	if (Z_TYPE_P(zv) != IS_CONSTANT_AST) {
+		return SUCCESS;
+	}
+
+	return zval_update_constant_ex(zv, scope);
+}
+#else
+#define opkit_update_constant_safe(zv, scope) zval_update_constant_ex(zv, scope)
+#endif
 
 zend_persistent_script *opkit_compile_file(zend_file_handle *file_handle, int type, zend_op_array **op_array_p)
 {
@@ -1653,7 +1720,7 @@ zend_persistent_script *opkit_compile_file(zend_file_handle *file_handle, int ty
 					c->name = zend_string_copy(Z_STR_P(name_zv));
 					ZVAL_DUP(&c->value, val_zv);
 					if (Z_OPT_CONSTANT(c->value)) {
-						zval_update_constant_ex(&c->value, op_array->scope);
+						opkit_update_constant_safe(&c->value, op_array->scope);
 					}
 					ZEND_CONSTANT_SET_FLAGS(c, 0, PHP_USER_CONSTANT);
 					zend_hash_add_ptr(EG(zend_constants), c->name, c);
@@ -1687,7 +1754,7 @@ zend_persistent_script *opkit_compile_file(zend_file_handle *file_handle, int ty
 				for (uint32_t i = 0; i < op_array->last_literal; i++) {
 					zval *zv = &op_array->literals[i];
 					if (Z_TYPE_P(zv) == IS_CONSTANT_AST) {
-						zval_update_constant_ex(zv, op_array->scope);
+						opkit_update_constant_safe(zv, op_array->scope);
 					}
 				}
 			}
@@ -1708,7 +1775,7 @@ zend_persistent_script *opkit_compile_file(zend_file_handle *file_handle, int ty
 								if (ce->properties_info_table && ce->properties_info_table[i]) {
 									scope = ce->properties_info_table[i]->ce;
 								}
-								zval_update_constant_ex(zv, scope);
+								opkit_update_constant_safe(zv, scope);
 							}
 						}
 					}
@@ -1718,7 +1785,7 @@ zend_persistent_script *opkit_compile_file(zend_file_handle *file_handle, int ty
 						for (uint32_t i = 0; i < ce->default_static_members_count; i++) {
 							zval *zv = &ce->default_static_members_table[i];
 							if (Z_TYPE_P(zv) == IS_CONSTANT_AST) {
-								zval_update_constant_ex(zv, ce);
+								opkit_update_constant_safe(zv, ce);
 							}
 						}
 					}
@@ -1728,7 +1795,7 @@ zend_persistent_script *opkit_compile_file(zend_file_handle *file_handle, int ty
 						zend_class_constant *c;
 						ZEND_HASH_FOREACH_PTR(&ce->constants_table, c) {
 							if (Z_TYPE(c->value) == IS_CONSTANT_AST) {
-								zval_update_constant_ex(&c->value, c->ce);
+								opkit_update_constant_safe(&c->value, c->ce);
 							}
 						} ZEND_HASH_FOREACH_END();
 					}
@@ -1743,7 +1810,7 @@ zend_persistent_script *opkit_compile_file(zend_file_handle *file_handle, int ty
 							for (uint32_t j = 0; j < func->last_literal; j++) {
 								zval *zv = &func->literals[j];
 								if (Z_TYPE_P(zv) == IS_CONSTANT_AST) {
-									zval_update_constant_ex(zv, func->scope);
+									opkit_update_constant_safe(zv, func->scope);
 								}
 							}
 						} ZEND_HASH_FOREACH_END();
@@ -1762,7 +1829,7 @@ zend_persistent_script *opkit_compile_file(zend_file_handle *file_handle, int ty
 					for (uint32_t j = 0; j < fop->last_literal; j++) {
 						zval *zv = &fop->literals[j];
 						if (Z_TYPE_P(zv) == IS_CONSTANT_AST) {
-							zval_update_constant_ex(zv, fop->scope);
+							opkit_update_constant_safe(zv, fop->scope);
 						}
 					}
 				} ZEND_HASH_FOREACH_END();
@@ -1822,6 +1889,7 @@ zend_persistent_script *opkit_compile_file(zend_file_handle *file_handle, int ty
 
 	if (EG(exception)) {
 		free_persistent_script(new_persistent_script, 1);
+		opkit_free_ast_ref_list();
 		return NULL;
 	}
 
@@ -1844,6 +1912,101 @@ static zend_string *opkit_get_relative_path(zend_string *path, zend_string *base
 		return zend_string_init(rel, strlen(rel), 0);
 	}
 	return zend_string_copy(path);
+}
+
+typedef struct _opkit_op_array_list {
+	zend_op_array **ops;
+	uint32_t count;
+	uint32_t capacity;
+} opkit_op_array_list;
+
+static void opkit_op_array_list_init(opkit_op_array_list *list)
+{
+	list->ops = NULL;
+	list->count = 0;
+	list->capacity = 0;
+}
+
+static void opkit_op_array_list_add(opkit_op_array_list *list, zend_op_array *op)
+{
+	if (!op) return;
+	if (list->count >= list->capacity) {
+		list->capacity = list->capacity ? list->capacity * 2 : 16;
+		list->ops = erealloc(list->ops, list->capacity * sizeof(zend_op_array *));
+	}
+	list->ops[list->count++] = op;
+}
+
+static void opkit_op_array_list_free(opkit_op_array_list *list)
+{
+	if (list->ops) {
+		efree(list->ops);
+	}
+	list->ops = NULL;
+	list->count = list->capacity = 0;
+}
+
+static void opkit_collect_op_arrays(zend_persistent_script *script, opkit_op_array_list *list)
+{
+	opkit_op_array_list_add(list, &script->script.main_op_array);
+
+	zend_function *f;
+	ZEND_HASH_FOREACH_PTR(&script->script.function_table, f) {
+		if (f->type == ZEND_USER_FUNCTION) {
+			opkit_op_array_list_add(list, &f->op_array);
+		}
+	} ZEND_HASH_FOREACH_END();
+
+	zend_class_entry *ce;
+	ZEND_HASH_FOREACH_PTR(&script->script.class_table, ce) {
+		if (ce->type != ZEND_USER_CLASS) continue;
+		ZEND_HASH_FOREACH_PTR(&ce->function_table, f) {
+			if (f->type == ZEND_USER_FUNCTION) {
+				opkit_op_array_list_add(list, &f->op_array);
+			}
+		} ZEND_HASH_FOREACH_END();
+#if PHP_VERSION_ID >= 80400
+		zend_property_info *prop;
+		ZEND_HASH_FOREACH_PTR(&ce->properties_info, prop) {
+			if (prop->ce == ce && prop->hooks) {
+				for (uint32_t i = 0; i < ZEND_PROPERTY_HOOK_COUNT; i++) {
+					if (prop->hooks[i] && prop->hooks[i]->type == ZEND_USER_FUNCTION) {
+						opkit_op_array_list_add(list, &prop->hooks[i]->op_array);
+					}
+				}
+			}
+		} ZEND_HASH_FOREACH_END();
+#endif
+	} ZEND_HASH_FOREACH_END();
+}
+
+static void opkit_destroy_op_array_safe(zend_op_array *op_array)
+{
+	if (!op_array) return;
+
+	if (op_array->num_dynamic_func_defs && op_array->dynamic_func_defs) {
+		for (uint32_t i = 0; i < op_array->num_dynamic_func_defs; i++) {
+			opkit_destroy_op_array_safe(op_array->dynamic_func_defs[i]);
+		}
+		efree(op_array->dynamic_func_defs);
+		op_array->dynamic_func_defs = NULL;
+	}
+
+	if (op_array->static_variables) {
+		efree(op_array->static_variables);
+		op_array->static_variables = NULL;
+	}
+}
+
+static void opkit_free_ast_ref_list(void)
+{
+	while (opkit_ast_ref_list) {
+		opkit_ast_ref_node *node = opkit_ast_ref_list;
+		opkit_ast_ref_list = node->next;
+		zend_ast_destroy(GC_AST(node->ref));
+		efree(node->ref);
+		efree(node);
+	}
 }
 
 char *opkit_compile_get_phpc_file_path(zend_string *output_path, zend_string *rel_path)
@@ -2190,6 +2353,10 @@ int opkit_compile_script_store(zend_string *output_path, zend_persistent_script 
 	ZCG(current_persistent_script) = script;
 
 	/* Copy into memory block */
+	opkit_op_array_list op_arrays;
+	opkit_op_array_list_init(&op_arrays);
+	opkit_collect_op_arrays(script, &op_arrays);
+
 	zend_persistent_script *persisted_script = zend_accel_script_persist(script, 0);
 
 	if (!persisted_script) {
@@ -2272,6 +2439,13 @@ int opkit_compile_script_store(zend_string *output_path, zend_persistent_script 
 	info_p->script_offset = (char*)script - (char*)script->mem;
 	info_p->timestamp = time(NULL);
 
+	for (uint32_t i = 0; i < op_arrays.count; i++) {
+		opkit_destroy_op_array_safe(op_arrays.ops[i]);
+	}
+	opkit_op_array_list_free(&op_arrays);
+
+	opkit_free_ast_ref_list();
+
 	/* Clean up orig_script while xlat_table is still available.
 	 * zend_accel_script_persist already released the interned strings it moved. */
 	if (orig_script->script.filename && !zend_shared_alloc_get_xlat_entry(orig_script->script.filename)) {
@@ -2341,6 +2515,13 @@ int opkit_compile_script_store(zend_string *output_path, zend_persistent_script 
 	return SUCCESS;
 
 store_failure:
+	for (uint32_t i = 0; i < op_arrays.count; i++) {
+		opkit_destroy_op_array_safe(op_arrays.ops[i]);
+	}
+	opkit_op_array_list_free(&op_arrays);
+
+	opkit_free_ast_ref_list();
+
 	if (rel_filename) {
 		zend_string_release(rel_filename);
 	}

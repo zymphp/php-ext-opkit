@@ -163,7 +163,8 @@ zend_persistent_script *opkit_compile_file(zend_file_handle *file_handle, int ty
 
         // 预解析 IS_CONSTANT_AST：将常量引用解析为实际值
         // 避免 persist 阶段访问已释放的 arena 内存
-        zval_update_constant_ex(...)  // 对属性默认值、类常量、字面量等
+        // 对 enum case (ZEND_AST_CONST_ENUM_INIT) 不直接解析，而是复制到堆上
+        opkit_update_constant_safe(...)  // 对属性默认值、类常量、字面量等
 
         // 创建持久化脚本结构
         new_persistent_script = create_persistent_script();
@@ -329,12 +330,36 @@ zend_persistent_script *zend_accel_script_persist(zend_persistent_script *script
     ZCG(current_persistent_script) = NULL;
     return new_script;
 }
+
+// 持久化后资源清理
+// zend_persist_op_array_ex 通过 _opkit_shared_memdup_put_free_*() 释放了 opcodes/arg_info
+// 等，但 dynamic_func_defs 数组和 static_variables HashTable 结构仍留在堆上。
+// 由于 zend_hash_persist 会释放 HashTable 的 arData，持久化后无法安全遍历 function_table
+// 来定位这些资源。因此我们在持久化前收集所有 op_array 指针，持久化后统一清理。
+static void opkit_destroy_op_array_safe(zend_op_array *op_array) {
+    if (!op_array) return;
+
+    // 递归释放 dynamic_func_defs 数组本身（内部 op_array 的 opcodes 等已被 persist 释放）
+    if (op_array->num_dynamic_func_defs && op_array->dynamic_func_defs) {
+        for (uint32_t i = 0; i < op_array->num_dynamic_func_defs; i++) {
+            opkit_destroy_op_array_safe(op_array->dynamic_func_defs[i]);
+        }
+        efree(op_array->dynamic_func_defs);
+        op_array->dynamic_func_defs = NULL;
+    }
+
+    // 释放 static_variables HashTable 结构（arData 已被 zend_hash_persist 释放）
+    if (op_array->static_variables) {
+        efree(op_array->static_variables);
+        op_array->static_variables = NULL;
+    }
+}
 ```
 
 **内存复制宏详解：**
 
 ```c
-// 通用内存复制宏
+// 通用内存复制宏（仅复制，不释放原内存）
 #define _opkit_shared_memdup_put(ptr, size) ({ \
     void *new_p = ZCG(mem); \
     ZCG(mem) = (void*)((char*)ZCG(mem) + ZEND_ALIGNED_SIZE(size)); \
@@ -342,7 +367,7 @@ zend_persistent_script *zend_accel_script_persist(zend_persistent_script *script
     new_p; \
 })
 
-// 带释放的内存复制
+// 带释放的内存复制（仅用于堆分配且不再需要的结构）
 static zend_always_inline void *_opkit_shared_memdup_put_free(void *source, size_t size) {
     void *old_p;
     if ((old_p = zend_hash_index_find_ptr(&ZCG(xlat_table), (uintptr_t)source)) != NULL) {
@@ -357,6 +382,11 @@ static zend_always_inline void *_opkit_shared_memdup_put_free(void *source, size
 static zend_always_inline void _opkit_shared_alloc_register_xlat_entry(const void *key, const void *value) {
     zend_hash_index_update_ptr(&ZCG(xlat_table), (uintptr_t)key, (void*)value);
 }
+
+// AST 持久化注意事项：
+// 编译器 arena 上的 AST 节点（如 zend_ast_zval、zend_ast_list）不应使用 put_free，
+// 因为 arena 内存由 Zend 统一释放。应使用 zend_shared_memdup_put（即 _opkit_shared_memdup_put）。
+// 堆分配的 AST ref（如 opkit_copy_ast_ref 创建的）需要在持久化后手动释放。
 ```
 
 ---
@@ -541,9 +571,7 @@ static void zend_file_cache_serialize_op_array(zend_op_array *op_array,
     // 5. 序列化函数字符串
     SERIALIZE_STR(op_array->function_name);
     SERIALIZE_STR(op_array->filename);
-#if PHP_VERSION_ID < 80400
-    SERIALIZE_STR(op_array->doc_comment);
-#endif
+    SERIALIZE_STR(op_array->doc_comment);  // 所有 PHP 版本均保留
 
     // 6. 序列化变量名
     if (op_array->vars) {
@@ -1070,17 +1098,28 @@ static zend_property_info *zend_persist_property_info(zend_property_info *prop)
 #endif
 ```
 
-### 8.2 doc_comment 移除处理
+### 8.2 doc_comment 版本处理
 
-PHP 8.4 从多个结构中移除了 doc_comment：
+PHP 8.4 从 `zend_property_info` 中移除了 `doc_comment`，但 `zend_op_array`、`zend_class_constant` 和 `zend_class_entry` 仍保留该字段（`zend_class_entry` 的 `doc_comment` 在 8.4+ 被移出了 `info.user` union，直接位于结构体中）。
 
 ```c
-// 序列化条件编译
-#if PHP_VERSION_ID < 80400
-    SERIALIZE_STR(op_array->doc_comment);
+// op_array / class_constant —— 所有版本均保留 doc_comment
+if (op_array->doc_comment) {
+    zend_accel_store_interned_string(op_array->doc_comment);
+}
+
+// class_entry —— 按版本区分位置
+#if PHP_VERSION_ID >= 80400
+    if (ce->doc_comment) {
+        zend_accel_store_interned_string(ce->doc_comment);
+    }
+#else
+    if (ce->info.user.doc_comment) {
+        zend_accel_store_interned_string(ce->info.user.doc_comment);
+    }
 #endif
 
-// 持久化条件编译
+// property_info —— 仅在 8.2/8.3 中保留
 #if PHP_VERSION_ID < 80400
     if (copy->doc_comment) {
         zend_accel_store_interned_string(copy->doc_comment);

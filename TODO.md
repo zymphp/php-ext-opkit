@@ -84,7 +84,43 @@
 - 问题: 返回类型为 `mixed`，入口函数无返回值时返回 NULL
 - 修复: 两处调用 `main()` 的位置均检查返回值类型，仅 `IS_LONG` 直接返回，其他情况返回 0。同时更新 stub.php 和 arginfo 的返回类型声明为 `int`。
 
+### 已修复 (2026-05-14) —— enum 编译内存泄漏与 doc_comment 泄漏
+
+**✅ Enum case AST 内存泄漏（编译含 enum 的代码库时泄漏）**
+- 问题: 编译 `neuron-core`（360 个文件）时报告 603 个内存泄漏，其中 562 个来自 `zend_string.h`，30 个来自 `zend_ast.c`
+- 根因 1 (enum): `opkit_update_constant_safe()` 对 `ZEND_AST_CONST_ENUM_INIT` 调用 `opkit_copy_ast_ref()` 复制 AST 后，未释放 PHP 编译器通过 `zend_ast_copy()` 分配的原始堆上 AST，导致每个 enum case 泄漏一个 `zend_ast_ref`（含内部字符串）
+- 根因 2 (doc_comment): `src/opkit_zend_persist.c` 中对 `doc_comment` 的持久化被 `#if PHP_VERSION_ID < 80400` 错误包裹。PHP 8.4/8.5 的 `zend_op_array`、`zend_class_entry`、`zend_class_constant` 仍保留 `doc_comment` 字段，导致 doc comment 字符串既未持久化也未释放
+- 修复:
+  - `src/opkit_compile.c`: 替换 enum AST 前调用 `zend_ast_destroy(ast); efree(Z_AST_P(zv));`
+  - `src/opkit_zend_persist.c`: `op_array->doc_comment` 和 `zend_class_constant->doc_comment` 移除错误版本限制；`zend_class_entry->doc_comment` 按版本区分（8.4+ 在 union 外，8.2/8.3 在 `info.user` 内）；`zend_property_info->doc_comment` 保持 `< 80400`（PHP 8.4 确实移除了该字段）
+  - `src/opkit_zend_persist.c`: AST 持久化从 `zend_shared_memdup_put_free` 改为 `zend_shared_memdup`，因为 arena 上的 AST 不应被 `efree`；堆分配的 AST ref 在 `IS_CONSTANT_AST` 处理分支中通过 `zval_ptr_dtor_nogc` 释放
+  - `src/opkit_wrapper.h`: 补充定义 `zend_shared_memdup` → `_opkit_shared_memdup_put`
+- 验证: PHP 8.2-8.5 全版本编译 `neuron-core` 后 0 泄漏，测试全部通过
+
+**✅ Persistence 后堆资源清理（dynamic_func_defs / static_variables）**
+- 问题: `zend_persist_op_array_ex` 通过 `_opkit_shared_memdup_put_free_*()` 释放了 opcodes/arg_info 等，但 `literals`、`dynamic_func_defs`、`static_variables` HashTable 结构仍留在堆上，导致大量字符串和对象泄漏
+- 根因: `zend_hash_persist` 会释放 HashTable 的 `arData`，导致持久化后无法安全遍历 `function_table`/`class_table` 来定位并清理这些残留资源
+- 修复:
+  - `src/opkit_compile.c`: 新增 `opkit_op_array_list` 收集器，在 `zend_accel_script_persist()` **之前**收集所有 op_array 指针（main_op_array + file-level functions + class methods + property hooks）
+  - 持久化完成后调用 `opkit_destroy_op_array_safe()`：递归释放 `dynamic_func_defs` 数组、释放 `static_variables` HashTable 结构本身（arData 已被 `zend_hash_persist` 释放，不可二次释放）
+  - 新增 `opkit_free_ast_ref_list()` 统一释放 `opkit_copy_ast_ref` 创建的堆上 AST ref
+  - 成功路径和 `store_failure` 失败路径均执行清理，避免异常退出时泄漏
+
+**✅ phpc CLI 类自动加载**
+- 问题: 编译包含跨文件类引用的代码（如 enum case 或 `new` 默认参数）时，`zval_update_constant_ex` 触发 `zend_lookup_class`，若类未加载会导致 fatal error
+- 修复: `bin/phpc` 在编译前预扫描所有源文件，构建 FQCN → 文件路径映射，注册 `spl_autoload_register` 回调按需 `require_once`，解决编译时类依赖问题
+
+### 测试结果汇总 (2026-05-14)
+
+| PHP 版本 | 通过 | 跳过 | 失败 | 通过率 |
+|---------|------|------|------|--------|
+| PHP 8.2.30 | 26 | 5 | 0 | 100% |
+| PHP 8.3.30 | 26 | 5 | 0 | 100% |
+| PHP 8.4.19 | 27 | 4 | 0 | 100% |
+| PHP 8.5.4  | 28 | 3 | 0 | 100% |
+
 ### 跳过的测试
 - `tests/05_triple_des.phpt` - 需要 openssl 扩展
 - `tests/18_property_hooks.phpt` - PHP 8.4+ 专属（在 8.2/8.3 跳过）
 - `tests/24_php85_fcc_const.phpt` - PHP 8.5+ 专属（在 8.2/8.3/8.4 跳过）
+- `tests/27_fork_shm.phpt` / `tests/29_shm_reset_fork.phpt` - 需要 pcntl 扩展

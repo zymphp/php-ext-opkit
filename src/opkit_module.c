@@ -346,29 +346,34 @@ static void opkit_do_compile_dir(zend_string *output_path, zend_string *dir_path
 ZEND_FUNCTION(opkit_compile_file) {
 	zend_string *output_path;
 	zend_string *script_name;
+	zend_string *base_path_param = NULL;
 
-	if (zend_parse_parameters(ZEND_NUM_ARGS(), "SS", &output_path, &script_name) == FAILURE) {
+	if (zend_parse_parameters(ZEND_NUM_ARGS(), "SS|S", &output_path, &script_name, &base_path_param) == FAILURE) {
 		RETURN_THROWS();
 	}
 
 	zend_string *resolved_output_path = opkit_resolve_path(output_path);
 	zend_string *resolved_script_path = opkit_resolve_path(script_name);
 
-	char *p = ZSTR_VAL(resolved_script_path);
-	char *slash = p + ZSTR_LEN(resolved_script_path);
-	while (--slash >= p && !IS_SLASH(*slash));
 	zend_string *base_path = NULL;
-	if (slash >= p) {
-		size_t dir_len = slash - p;
-		if (dir_len == 0) { // Root directory "/"
-			base_path = zend_string_init("/", 1, 0);
-		} else {
-			base_path = zend_string_init(p, dir_len, 0);
-		}
+	if (base_path_param && ZSTR_LEN(base_path_param) > 0) {
+		base_path = opkit_resolve_path(base_path_param);
 	} else {
-		char cwd_buf[MAXPATHLEN];
-		char *cwd = VCWD_GETCWD(cwd_buf, MAXPATHLEN);
-		base_path = zend_string_init(cwd, strlen(cwd), 0);
+		char *p = ZSTR_VAL(resolved_script_path);
+		char *slash = p + ZSTR_LEN(resolved_script_path);
+		while (--slash >= p && !IS_SLASH(*slash));
+		if (slash >= p) {
+			size_t dir_len = slash - p;
+			if (dir_len == 0) {
+				base_path = zend_string_init("/", 1, 0);
+			} else {
+				base_path = zend_string_init(p, dir_len, 0);
+			}
+		} else {
+			char cwd_buf[MAXPATHLEN];
+			char *cwd = VCWD_GETCWD(cwd_buf, MAXPATHLEN);
+			base_path = zend_string_init(cwd, strlen(cwd), 0);
+		}
 	}
 
 	if (opkit_do_compile_file(resolved_output_path, resolved_script_path, base_path)) {
