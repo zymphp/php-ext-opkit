@@ -1503,7 +1503,7 @@ zend_persistent_script *opkit_compile_script_load(zend_string *filename)
 	zend_file_cache_unserialize(script, buf);
 
 	/* Register file-level constants from the loaded script into EG(zend_constants)
-	 * so that opkit_update_constant_safe() can resolve constant references
+	 * that opkit_update_constant_safe() can resolve constant references
 	 * (e.g. DEFAULT_NAME used as default property/parameter value). */
 	{
 		zend_constant *zc;
