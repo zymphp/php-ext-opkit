@@ -114,10 +114,15 @@
 
 | PHP 版本 | 通过 | 跳过 | 失败 | 通过率 |
 |---------|------|------|------|--------|
-| PHP 8.2.30 | 26 | 5 | 0 | 100% |
-| PHP 8.3.30 | 26 | 5 | 0 | 100% |
-| PHP 8.4.19 | 27 | 4 | 0 | 100% |
-| PHP 8.5.4  | 28 | 3 | 0 | 100% |
+| PHP 8.2.30 | 29 | 5 | 0 | 100% |
+| PHP 8.3.30 | 29 | 5 | 0 | 100% |
+| PHP 8.4.19 | 30 | 4 | 0 | 100% |
+| PHP 8.5.4  | 31 | 3 | 0 | 100% |
+
+### 新增测试文件 (2026-05-14)
+- `tests/31_compile_file_basepath.phpt` - `opkit_compile_file` 显式 base_path 保留目录结构
+- `tests/32_compile_file_no_basepath.phpt` - `opkit_compile_file` 无 base_path 向后兼容（扁平输出）
+- `tests/33_enum_basic.phpt` - Enum 支持（backed/unbacked，默认值）
 
 ### 跳过的测试
 - `tests/05_triple_des.phpt` - 需要 openssl 扩展

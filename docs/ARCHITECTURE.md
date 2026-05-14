@@ -468,7 +468,7 @@ exit(opkit_boot());
 
 | 函数 | 参数 | 返回值 | 说明 |
 |------|------|--------|------|
-| `opkit_compile_file()` | `$output_dir`, `$source_file` | bool | 编译 PHP 文件为 .phpc |
+| `opkit_compile_file()` | `$output_dir`, `$source_file`, `$base_path = null` | bool | 编译 PHP 文件为 .phpc |
 | `opkit_compile_dir()` | `$output_dir`, `$dir` | bool | 递归编译目录下所有 .php 文件 |
 | `opkit_boot()` | `$entry`, `$args` | int | 注册符号并执行入口函数 |
 | `opkit_load()` | `$filename` | bool | 加载 .phpc 文件（不执行） |
@@ -577,6 +577,9 @@ make
 | `28_shm_memory.phpt` | SHM 内存占用对比 | 堆 vs SHM |
 | `29_shm_reset_fork.phpt` | SHM reset + fork | opkit_shm_reset + pcntl |
 | `30_shm_hit_rate.phpt` | SHM 命中率/reset | opkit_shm_stat + reset |
+| `31_compile_file_basepath.phpt` | base_path 编译 | 目录结构保留 |
+| `32_compile_file_no_basepath.phpt` | 无 base_path 编译 | 向后兼容 |
+| `33_enum_basic.phpt` | Enum 支持 | backed/unbacked enum |
 
 ### 11.2 测试格式
 

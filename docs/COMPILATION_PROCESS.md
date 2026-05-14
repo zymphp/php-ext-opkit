@@ -164,6 +164,7 @@ zend_persistent_script *opkit_compile_file(zend_file_handle *file_handle, int ty
         // 预解析 IS_CONSTANT_AST：将常量引用解析为实际值
         // 避免 persist 阶段访问已释放的 arena 内存
         // 对 enum case (ZEND_AST_CONST_ENUM_INIT) 不直接解析，而是复制到堆上
+        // 防止 zval_update_constant_ex 在类未完全链接时调用 zend_enum_new() 导致 SIGSEGV
         opkit_update_constant_safe(...)  // 对属性默认值、类常量、字面量等
 
         // 创建持久化脚本结构
