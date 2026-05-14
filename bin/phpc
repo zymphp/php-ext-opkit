@@ -124,6 +124,30 @@ function resolve_absolute($path) {
     return $real ? $real : $full;
 }
 
+// Extract fully qualified class name (FQCN) from a PHP source file.
+// Uses regex to find namespace and class/enum/interface/trait declarations.
+function extract_fqcn($filepath) {
+    $content = file_get_contents($filepath);
+    if ($content === false) return null;
+
+    // Remove comments to avoid false matches
+    $content = preg_replace('#//.*|/\*.*?\*/#s', '', $content);
+
+    // Find namespace
+    $namespace = '';
+    if (preg_match('/^\s*namespace\s+([^;{]+?)\s*[;{]/m', $content, $m)) {
+        $namespace = trim($m[1]);
+    }
+
+    // Find class/enum/interface/trait name
+    if (preg_match('/\b(?:class|enum|interface|trait)\s+(\w+)/', $content, $m)) {
+        $class = $m[1];
+        return $namespace ? $namespace . '\\' . $class : $class;
+    }
+
+    return null;
+}
+
 // 1. Compile Mode
 if ($can_compile) {
     $abs_src = resolve_absolute($src);
@@ -149,6 +173,32 @@ if ($can_compile) {
     echo "Source: $abs_src\n";
     echo "Output: $abs_output\n";
     echo "--------------------------------------------------\n";
+
+    // Build class-to-file autoloader map for cross-file dependencies.
+    // During compilation, when PHP encounters an unknown class, it calls
+    // the autoloader, which require_once's the dependency file. This
+    // registers the class in CG(class_table) so the compiler can proceed.
+    $class_map = [];
+    $scan_it = is_dir($abs_src) ? new RecursiveIteratorIterator(
+        new RecursiveDirectoryIterator($abs_src, RecursiveDirectoryIterator::SKIP_DOTS),
+        RecursiveIteratorIterator::SELF_FIRST
+    ) : [];
+    foreach ($scan_it as $scan_file) {
+        if ($scan_file->isFile() && $scan_file->getExtension() === 'php') {
+            $fqcn = extract_fqcn($scan_file->getRealPath());
+            if ($fqcn !== null) {
+                $class_map[strtolower($fqcn)] = $scan_file->getRealPath();
+            }
+        }
+    }
+    if ($class_map) {
+        spl_autoload_register(function ($class) use ($class_map) {
+            $key = strtolower($class);
+            if (isset($class_map[$key])) {
+                require_once $class_map[$key];
+            }
+        });
+    }
 
     $count = 0;
     $skipped = 0;
