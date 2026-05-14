@@ -39,28 +39,7 @@
 ## 高级 Phar 支持
 - [x] **归档优化**: 支持 Phar 压缩（GZip、BZip2）和数字签名。
 
-## 测试结果汇总 (2026-05-06)
-
-| PHP 版本 | 通过 | 跳过 | 失败 | 通过率 |
-|---------|------|------|------|--------|
-| PHP 8.2.30 | 22 | 3 | 0 | 100% |
-| PHP 8.3.30 | 22 | 3 | 0 | 100% |
-| PHP 8.4.19 | 23 | 2 | 0 | 100% |
-| PHP 8.5.4  | 24 | 1 | 0 | 100% |
-
-### 新增测试文件
-- `tests/20_constants_comprehensive.phpt` - 全面常量测试
-- `tests/21_properties_comprehensive.phpt` - 全面属性测试
-- `tests/22_constants_properties_integration.phpt` - 集成测试
-- `tests/24_php85_fcc_const.phpt` - PHP 8.5 常量表达式中的第一类可调用对象测试
-
-### PHP 8.5 适配 (2026-05-06)
-- **深度 OPcache 集成**: 在 `opkit_compile_file()` 中临时保存并恢复 `zend_compile_file` 以绕过 OPcache 的 `persistent_compile_file` 钩子，编译完成后恢复。结构体定义（`zend_accel_directives`、`zend_accel_globals`、`zend_accel_shared_globals`）已更新至 8.5 格式。
-- **新增 AST 支持**: `ZEND_AST_OP_ARRAY`、`ZEND_AST_CALLABLE_CONVERT`、`zend_ast_is_decl()` 保护在四个阶段（persist/calc/serialize/unserialize）均已处理。
-- **新增 Opcode 支持**: `ZEND_DECLARE_ATTRIBUTED_CONST` + `ZEND_OP_DATA`（属性表持久化）。
-- **新增类型处理**: `IS_PTR`、`IS_INDIRECT`、`IS_OBJECT`、`IS_RESOURCE`、`IS_REFERENCE` 在所有 zval switch 中均已处理。
-- **新增属性字段**: `zend_attribute.validation_error` 支持。
-- **已知问题**: FCC（第一类可调用对象）常量在 `opkit_boot` 后存在轻微内存泄漏（2×344 字节），属于低优先级问题。
+## 测试结果汇总 (2026-05-14)
 
 ### 已修复 (2026-05-05)
 
@@ -133,22 +112,25 @@
 ### 已修复 (2026-05-14 #2) —— 编译失败清理与持久化阶段内存安全
 
 **✅ 编译失败路径全局表清理**
-- ... (同前)
+- 问题: 批量编译时某个文件编译失败触发 bailout，`CG(function_table)` / `CG(class_table)` / `EG(zend_constants)` 中残留该文件添加的条目，导致后续编译冲突
+- 修复: `opkit_compile_file()` 的 `!op_array` 分支中，通过 `zend_hash_del_bucket` 反向遍历删除超出 `orig_*_count` 的残留条目，同时调用 `opkit_free_ast_ref_list()` 释放已积累的 AST ref
 
 **✅ 持久化后 AST ref 列表 use-after-free**
-- ... (同前)
+- 问题: `opkit_free_ast_ref_list()` 在持久化成功后访问 `node->ref`，但持久化阶段 `zend_persist_zval()` 已通过 `efree(old_ref)` 释放了该 ref，导致 use-after-free
+- 修复: 新增 `opkit_clear_ast_ref_list()` 仅释放追踪节点本身（不触碰 ref），在持久化成功路径和 `store_failure` 路径调用；编译失败路径保持 `opkit_free_ast_ref_list()`（持久化未运行，ref 仍有效）
 
 **✅ 联合类型 arena 检查（`zend_persist_type`）**
-- ... (同前)
+- 问题: 联合类型 `A|B`（两个类引用）的类型列表在编译阶段由 arena 分配。`zend_compile()` 返回后 arena 已销毁，持久化时 `_opkit_shared_memdup_put_free_ms` 尝试 `efree()` arena 指针，破坏 ZendMM 堆
+- 修复: `zend_persist_type()` 增加 `ZEND_TYPE_USES_ARENA(*type) || zend_accel_in_shm(old_list)` 判断，arena 类型使用 `_opkit_shared_memdup_put_ms`（拷贝后不释放）
 
 **✅ 字符串 Enum FQN >= 41 字符崩溃**
-- 问题: 3-case string-backed enum 在 FQN >= 41 字符时 `zend_mm_heap corrupted`（如 `NeuronAI\Chat\Enums\AttachmentContentType`）
+- 问题: 3-case string-backed enum 在 FQN >= 41 字符时 `zend_mm_heap corrupted`（如 `NeuronAI\Chat\Enums\AttachmentContentType` 41字符）
 - 根因: `zend_persist_zval_calc` 的 `IS_CONSTANT_AST` 分支仅处理 `ZEND_AST_ZVAL` / `ZEND_AST_CONSTANT`，跳过 `ZEND_AST_CONST_ENUM_INIT`，导致未为 enum case AST（含 `zend_ast_ref` 包装、AST 节点、3 个子节点）预留内存。持久化阶段写入时溢出共享内存块
 - 修复: `zend_persist_zval_calc` 增加 else 分支调用 `zend_persist_ast_calc` 处理其他 AST 类型（含 enum init）；`zend_persist_zval` 补充 `GC_SET_REFCOUNT` / `GC_ADD_FLAGS(GC_IMMUTABLE)` / `efree(old_ref)` 与 OPcache 对齐
 
 ### 🔴 已知问题 (2026-05-14)
 
 **编译顺序导致的跨文件类依赖**
-- 问题: `opkit_compile_file` 编译每个文件后将类/函数从全局表中 `zend_accel_move_user_*` 移出，导致后续文件编译时找不到之前的类（如 `PropertyType` enum 先于 `ObjectProperty` 编译但已被移出）
+- 问题: `opkit_compile_file` 编译每个文件后将类/函数从全局表中 `zend_accel_move_user_*` 移出，导致后续文件编译时找不到之前的类（如 `PropertyType` enum 先于 `ObjectProperty` 编译但已被移出 `CG(class_table)`）
 - 影响: neuron-core 编译时 11 个文件报 Class not found
 - 解决思路: 先扫描全部文件建立依赖图，按拓扑序编译；或允许多文件合并编译后再持久化
