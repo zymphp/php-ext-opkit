@@ -130,7 +130,7 @@
 
 ### 🔴 已知问题 (2026-05-14)
 
-**编译顺序导致的跨文件类依赖**
-- 问题: `opkit_compile_file` 编译每个文件后将类/函数从全局表中 `zend_accel_move_user_*` 移出，导致后续文件编译时找不到之前的类（如 `PropertyType` enum 先于 `ObjectProperty` 编译但已被移出 `CG(class_table)`）
-- 影响: neuron-core 编译时 11 个文件报 Class not found
-- 解决思路: 先扫描全部文件建立依赖图，按拓扑序编译；或允许多文件合并编译后再持久化
+**✅ 编译顺序导致的跨文件类依赖**（已修复，见 2026-05-14 #3）
+- ~~问题: `opkit_compile_file` 编译每个文件后将类/函数从全局表中 `zend_accel_move_user_*` 移出，导致后续文件编译时找不到之前的类~~
+- ~~影响: neuron-core 编译时 11 个文件报 Class not found~~
+- 修复: `bin/phpc` 编译前预扫描所有源文件构建 FQCN→路径映射，注册 `spl_autoload_register`。编译期间遇到未知类时，autoloader 调用 `require_once` 加载依赖文件，类被注册到 `CG(class_table)` 后主编译继续。无需改动 C 代码
