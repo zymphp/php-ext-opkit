@@ -326,7 +326,12 @@ static void zend_persist_type(zend_type *type)
 {
 	if (ZEND_TYPE_HAS_LIST(*type)) {
 		zend_type_list *old_list = ZEND_TYPE_LIST(*type);
-		zend_type_list *new_list = _opkit_shared_memdup_put_free_ms(old_list, ZEND_TYPE_LIST_SIZE(old_list->num_types));
+		zend_type_list *new_list;
+		if (ZEND_TYPE_USES_ARENA(*type) || zend_accel_in_shm(old_list)) {
+			new_list = _opkit_shared_memdup_put_ms(old_list, ZEND_TYPE_LIST_SIZE(old_list->num_types));
+		} else {
+			new_list = _opkit_shared_memdup_put_free_ms(old_list, ZEND_TYPE_LIST_SIZE(old_list->num_types));
+		}
 		for (uint32_t i = 0; i < new_list->num_types; i++) {
 			zend_persist_type(&new_list->types[i]);
 		}

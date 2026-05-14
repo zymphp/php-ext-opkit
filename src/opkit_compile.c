@@ -50,6 +50,7 @@ static opkit_ast_ref_node *opkit_ast_ref_list = NULL;
 static int opkit_update_constant_safe(zval *zv, zend_class_entry *scope);
 #endif
 static void opkit_free_ast_ref_list(void);
+static void opkit_clear_ast_ref_list(void);
 
 #define zend_accel_error(type, ...) zend_error(type, __VA_ARGS__)
 #undef ACCEL_LOG_ERROR
@@ -1630,6 +1631,7 @@ static int opkit_update_constant_safe(zval *zv, zend_class_entry *scope)
 
 	return zval_update_constant_ex(zv, scope);
 }
+
 #else
 #define opkit_update_constant_safe(zv, scope) zval_update_constant_ex(zv, scope)
 #endif
@@ -1847,7 +1849,44 @@ zend_persistent_script *opkit_compile_file(zend_file_handle *file_handle, int ty
 	EG(record_errors) = 0;
 
 	if (!op_array) {
-		/* compilation failed */
+		/* compilation failed — clean up global table entries added
+		 * during this compilation and free any AST refs that were
+		 * accumulated in opkit_ast_ref_list before bailout. Without
+		 * this, residual entries (classes, functions, constants) from
+		 * failed compilations corrupt subsequent compilations, and
+		 * leaked AST refs can cause zend_mm_heap corrupted. */
+		if (CG(function_table)->nNumUsed > orig_functions_count) {
+			uint32_t i = CG(function_table)->nNumUsed;
+			while (i-- > orig_functions_count) {
+				Bucket *b = CG(function_table)->arData + i;
+				if (Z_TYPE(b->val) != IS_UNDEF) {
+					zend_hash_del_bucket(CG(function_table), b);
+				}
+			}
+			CG(function_table)->nNumUsed = orig_functions_count;
+		}
+		if (CG(class_table)->nNumUsed > orig_class_count) {
+			uint32_t i = CG(class_table)->nNumUsed;
+			while (i-- > orig_class_count) {
+				Bucket *b = CG(class_table)->arData + i;
+				if (Z_TYPE(b->val) != IS_UNDEF) {
+					zend_hash_del_bucket(CG(class_table), b);
+				}
+			}
+			CG(class_table)->nNumUsed = orig_class_count;
+		}
+		if (EG(zend_constants)->nNumUsed > orig_constants_count) {
+			uint32_t i = EG(zend_constants)->nNumUsed;
+			while (i-- > orig_constants_count) {
+				Bucket *b = EG(zend_constants)->arData + i;
+				if (Z_TYPE(b->val) != IS_UNDEF) {
+					zend_hash_del_bucket(EG(zend_constants), b);
+				}
+			}
+			EG(zend_constants)->nNumUsed = orig_constants_count;
+		}
+
+		opkit_free_ast_ref_list();
 		zend_free_recorded_errors();
 		if (do_bailout) {
 			zend_bailout();
@@ -2012,6 +2051,20 @@ static void opkit_free_ast_ref_list(void)
 			}
 		}
 		efree(ref);
+		efree(node);
+	}
+}
+
+/* Clear the AST ref tracking list without freeing the underlying AST refs.
+ * Called after zend_accel_script_persist(), which already handles copying AST
+ * refs to persistent memory and freeing the heap originals via
+ * zend_persist_zval() -> efree(old_ref). Re-freeing them here would be a
+ * use-after-free. */
+static void opkit_clear_ast_ref_list(void)
+{
+	while (opkit_ast_ref_list) {
+		opkit_ast_ref_node *node = opkit_ast_ref_list;
+		opkit_ast_ref_list = node->next;
 		efree(node);
 	}
 }
@@ -2451,7 +2504,7 @@ int opkit_compile_script_store(zend_string *output_path, zend_persistent_script 
 	}
 	opkit_op_array_list_free(&op_arrays);
 
-	opkit_free_ast_ref_list();
+	opkit_clear_ast_ref_list();
 
 	/* Clean up orig_script while xlat_table is still available.
 	 * zend_accel_script_persist already released the interned strings it moved. */
@@ -2527,7 +2580,7 @@ store_failure:
 	}
 	opkit_op_array_list_free(&op_arrays);
 
-	opkit_free_ast_ref_list();
+	opkit_clear_ast_ref_list();
 
 	if (rel_filename) {
 		zend_string_release(rel_filename);
