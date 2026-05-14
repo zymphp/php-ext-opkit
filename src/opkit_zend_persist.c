@@ -266,10 +266,13 @@ static void zend_persist_zval(zval *z)
 				if (ast->kind == ZEND_AST_ZVAL || ast->kind == ZEND_AST_CONSTANT || ast->kind == ZEND_AST_CONST_ENUM_INIT) {
 					Z_AST_P(z) = zend_shared_memdup_put(old_ref, sizeof(zend_ast_ref));
 					zend_persist_ast(ast);
+					Z_TYPE_FLAGS_P(z) = 0;
+					GC_SET_REFCOUNT(Z_COUNTED_P(z), 1);
+					GC_ADD_FLAGS(Z_COUNTED_P(z), GC_IMMUTABLE);
+					efree(old_ref);
 				} else {
 					ZVAL_NULL(z);
 				}
-				Z_TYPE_FLAGS_P(z) = 0;
 			}
 			break;
 #if PHP_VERSION_ID >= 80500

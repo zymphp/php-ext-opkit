@@ -133,21 +133,22 @@
 ### 已修复 (2026-05-14 #2) —— 编译失败清理与持久化阶段内存安全
 
 **✅ 编译失败路径全局表清理**
-- 问题: 批量编译时某个文件编译失败触发 bailout，`CG(function_table)` / `CG(class_table)` / `EG(zend_constants)` 中残留该文件添加的条目，导致后续编译冲突
-- 修复: `opkit_compile_file()` 的 `!op_array` 分支中，通过 `zend_hash_del_bucket` 反向遍历删除超出 `orig_*_count` 的残留条目，同时调用 `opkit_free_ast_ref_list()` 释放已积累的 AST ref
+- ... (同前)
 
 **✅ 持久化后 AST ref 列表 use-after-free**
-- 问题: `opkit_free_ast_ref_list()` 在持久化成功后访问 `node->ref`，但持久化阶段 `zend_persist_zval()` 已通过 `efree(old_ref)` 释放了该 ref，导致 use-after-free
-- 修复: 新增 `opkit_clear_ast_ref_list()` 仅释放追踪节点本身（不触碰 ref），在持久化成功路径和 `store_failure` 路径调用；编译失败路径保持 `opkit_free_ast_ref_list()`（持久化未运行，ref 仍有效）
+- ... (同前)
 
 **✅ 联合类型 arena 检查（`zend_persist_type`）**
-- 问题: 联合类型 `A|B`（两个类引用）的类型列表在编译阶段由 arena 分配。`zend_compile()` 返回后 arena 已销毁，持久化时 `_opkit_shared_memdup_put_free_ms` 尝试 `efree()` arena 指针，破坏 ZendMM 堆
-- 修复: `zend_persist_type()` 增加 `ZEND_TYPE_USES_ARENA(*type) || zend_accel_in_shm(old_list)` 判断，arena 类型使用 `_opkit_shared_memdup_put_ms`（拷贝后不释放）
+- ... (同前)
+
+**✅ 字符串 Enum FQN >= 41 字符崩溃**
+- 问题: 3-case string-backed enum 在 FQN >= 41 字符时 `zend_mm_heap corrupted`（如 `NeuronAI\Chat\Enums\AttachmentContentType`）
+- 根因: `zend_persist_zval_calc` 的 `IS_CONSTANT_AST` 分支仅处理 `ZEND_AST_ZVAL` / `ZEND_AST_CONSTANT`，跳过 `ZEND_AST_CONST_ENUM_INIT`，导致未为 enum case AST（含 `zend_ast_ref` 包装、AST 节点、3 个子节点）预留内存。持久化阶段写入时溢出共享内存块
+- 修复: `zend_persist_zval_calc` 增加 else 分支调用 `zend_persist_ast_calc` 处理其他 AST 类型（含 enum init）；`zend_persist_zval` 补充 `GC_SET_REFCOUNT` / `GC_ADD_FLAGS(GC_IMMUTABLE)` / `efree(old_ref)` 与 OPcache 对齐
 
 ### 🔴 已知问题 (2026-05-14)
 
-**字符串 Enum FQN >= 33 字符时崩溃**
-- 最小复现: `namespace Foo\Bar; enum ThisIsAVeryLongEnumClass: string { case A = "a"; case B = "b"; case C = "c"; }`（FQN 33字符）→ `zend_mm_heap corrupted`
-- 影响范围: FQN >= 33 字符的 backed string enum（如 `NeuronAI\Chat\Enums\AttachmentContentType` 41字符、`NeuronAI\RAG\PreProcessor\QueryTransformationType` 38字符）
-- 规律: FQN <= 32 正常，>= 33 崩溃；bare PHP 正常，仅 opkit 编译路径受影响；阈值与 namespace 段数和 class 名长度组合相关
-- 疑似原因: arena 分配的 enum case AST 子节点（class name string）在持久化期与 FQN 长度阈值交互导致的内存越界
+**编译顺序导致的跨文件类依赖**
+- 问题: `opkit_compile_file` 编译每个文件后将类/函数从全局表中 `zend_accel_move_user_*` 移出，导致后续文件编译时找不到之前的类（如 `PropertyType` enum 先于 `ObjectProperty` 编译但已被移出）
+- 影响: neuron-core 编译时 11 个文件报 Class not found
+- 解决思路: 先扫描全部文件建立依赖图，按拓扑序编译；或允许多文件合并编译后再持久化

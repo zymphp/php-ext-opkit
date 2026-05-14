@@ -169,6 +169,9 @@ static void zend_persist_zval_calc(zval *z)
 				ADD_SIZE(sizeof(zend_ast_ref));
 				ADD_SIZE_MS(sizeof(zend_ast_zval));
 				zend_persist_zval_calc(&((zend_ast_zval*)ast_ptr)->val);
+			} else {
+				ADD_SIZE(sizeof(zend_ast_ref));
+				zend_persist_ast_calc(ast_ptr);
 			}
 		}
 		break;
