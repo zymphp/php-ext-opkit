@@ -395,7 +395,9 @@ static void zend_file_cache_serialize_op_array(zend_op_array *op_array, zend_per
 					SERIALIZE_ATTRIBUTES(Z_PTR_P(literal));
 				}
 #endif
-				zend_serialize_opcode_handler(opline);
+				if (opline->handler) {
+					zend_serialize_opcode_handler(opline);
+				}
 				opline++;
 			}
 		}
@@ -1061,7 +1063,9 @@ static void zend_file_cache_unserialize_op_array(zend_op_array *op_array, zend_p
 				UNSERIALIZE_ATTRIBUTES(Z_PTR_P(literal));
 			}
 #endif
-			zend_deserialize_opcode_handler(opline);
+			if (opline->handler) {
+				zend_deserialize_opcode_handler(opline);
+			}
 			opline++;
 		}
 	}
@@ -1713,6 +1717,37 @@ zend_persistent_script *opkit_compile_file(zend_file_handle *file_handle, int ty
 
 		/* Restore OPcache's compile hook (or original, if no hook). */
 		zend_compile_file = saved_compile_file;
+
+		/* Fix any NULL opcode handlers left by the compiler (PHP 8.2
+		 * with DELAYED_BINDING may leave handlers unset on some opcodes). */
+		if (op_array) {
+			for (uint32_t i = 0; i < op_array->last; i++) {
+				zend_op *opline = &op_array->opcodes[i];
+				if (!opline->handler) zend_vm_set_opcode_handler(opline);
+			}
+			zend_function *f;
+			ZEND_HASH_FOREACH_PTR(CG(function_table), f) {
+				if (f->type == ZEND_USER_FUNCTION) {
+					for (uint32_t i = 0; i < f->op_array.last; i++) {
+						zend_op *opline = &f->op_array.opcodes[i];
+						if (!opline->handler) zend_vm_set_opcode_handler(opline);
+					}
+				}
+			} ZEND_HASH_FOREACH_END();
+			zend_class_entry *ce;
+			ZEND_HASH_FOREACH_PTR(CG(class_table), ce) {
+				if (ce->type == ZEND_USER_CLASS) {
+					ZEND_HASH_FOREACH_PTR(&ce->function_table, f) {
+						if (f->type == ZEND_USER_FUNCTION) {
+							for (uint32_t i = 0; i < f->op_array.last; i++) {
+								zend_op *opline = &f->op_array.opcodes[i];
+								if (!opline->handler) zend_vm_set_opcode_handler(opline);
+							}
+						}
+					} ZEND_HASH_FOREACH_END();
+				}
+			} ZEND_HASH_FOREACH_END();
+		}
 
 		/* Register file-level const declarations from ZEND_DECLARE_CONST opcodes
 		 * into EG(zend_constants) so pass_two() and zend_accel_move_user_constants()
