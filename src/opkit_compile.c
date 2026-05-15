@@ -312,6 +312,7 @@ static void zend_file_cache_serialize_type(zend_type *type, zend_persistent_scri
 		if (!IS_SERIALIZED(list)) {
 			uint32_t i;
 			SERIALIZE_PTR(list);
+			ZEND_TYPE_SET_PTR(*type, list);
 			UNSERIALIZE_PTR(list);
 			for (i = 0; i < list->num_types; i++) {
 				zend_file_cache_serialize_type(&list->types[i], script, info, buf);
@@ -319,7 +320,12 @@ static void zend_file_cache_serialize_type(zend_type *type, zend_persistent_scri
 		}
 	} else if (ZEND_TYPE_HAS_NAME(*type)) {
 		zend_string *type_name = ZEND_TYPE_NAME(*type);
-		SERIALIZE_STR(type_name);
+		if (ZSTR_IS_INTERNED(type_name)) {
+			type_name = zend_file_cache_serialize_interned(type_name, info);
+		} else {
+			SERIALIZE_STR(type_name);
+		}
+		ZEND_TYPE_SET_PTR(*type, type_name);
 	}
 }
 
