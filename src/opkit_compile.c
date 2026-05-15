@@ -43,6 +43,7 @@ static zend_string *current_string_pool = NULL;
 
 typedef struct _opkit_ast_ref_node {
 	zend_ast_ref *ref;
+	bool is_inline; /* true if children are within the same allocation (zend_ast_copy) */
 	struct _opkit_ast_ref_node *next;
 } opkit_ast_ref_node;
 static opkit_ast_ref_node *opkit_ast_ref_list = NULL;
@@ -1597,6 +1598,7 @@ static zend_ast_ref *opkit_copy_ast_ref(zend_ast *ast)
 
 	opkit_ast_ref_node *node = emalloc(sizeof(opkit_ast_ref_node));
 	node->ref = ref;
+	node->is_inline = false;
 	node->next = opkit_ast_ref_list;
 	opkit_ast_ref_list = node;
 
@@ -1624,8 +1626,16 @@ static int opkit_update_constant_safe(zval *zv, zend_class_entry *scope)
 	zend_ast *ast = Z_ASTVAL_P(zv);
 
 	if (ast->kind == ZEND_AST_CONST_ENUM_INIT) {
+		zend_ast_ref *old_ref = Z_AST_P(zv);
 		zend_ast_ref *ref = opkit_copy_ast_ref(ast);
 		ZVAL_AST(zv, ref);
+		if (old_ref) {
+			opkit_ast_ref_node *node = emalloc(sizeof(opkit_ast_ref_node));
+			node->ref = old_ref;
+			node->is_inline = true;
+			node->next = opkit_ast_ref_list;
+			opkit_ast_ref_list = node;
+		}
 		return SUCCESS;
 	}
 
@@ -2055,17 +2065,29 @@ static void opkit_free_ast_ref_list(void)
 	}
 }
 
-/* Clear the AST ref tracking list without freeing the underlying AST refs.
- * Called after zend_accel_script_persist(), which already handles copying AST
- * refs to persistent memory and freeing the heap originals via
- * zend_persist_zval() -> efree(old_ref). However, the AST child nodes
- * (zend_ast_zval) allocated by opkit_copy_ast_ref are NOT freed by persist,
- * so we must free them here. */
+/* Clear the AST ref tracking list. For refs created by zend_ast_copy
+ * (is_inline=true), children are within the same allocation and the whole
+ * block is freed via efree(ref). For refs created by opkit_copy_ast_ref
+ * (is_inline=false), children are separate heap allocations and must be
+ * freed individually before the parent ref. */
 static void opkit_clear_ast_ref_list(void)
 {
 	while (opkit_ast_ref_list) {
 		opkit_ast_ref_node *node = opkit_ast_ref_list;
 		opkit_ast_ref_list = node->next;
+		zend_ast_ref *ref = node->ref;
+		zend_ast *ast = GC_AST(ref);
+		if (!node->is_inline) {
+			if (ast->kind == ZEND_AST_CONST_ENUM_INIT) {
+				for (uint32_t i = 0; i < 3; i++) {
+					if (ast->child[i] && ast->child[i]->kind == ZEND_AST_ZVAL) {
+						zval_ptr_dtor_nogc(zend_ast_get_zval(ast->child[i]));
+						efree(ast->child[i]);
+					}
+				}
+			}
+		}
+		efree(ref);
 		efree(node);
 	}
 }
