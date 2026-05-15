@@ -54,7 +54,7 @@ size_t opkit_misc_size = 0;
 } while (0)
 
 #define zend_accel_store_string(str) do { \
-		if (str && !ZSTR_IS_INTERNED(str)) { \
+		if (str) { \
 			zend_string *new_str = zend_shared_alloc_get_xlat_entry(str); \
 			if (new_str) { \
 				zend_string_release_ex(str, GC_FLAGS(str) & IS_STR_PERSISTENT); \
@@ -85,8 +85,7 @@ size_t opkit_misc_size = 0;
 
 #define zend_accel_store_interned_string(str) do { \
 		if (str) { \
-			if (ZSTR_IS_INTERNED(str)) { \
-			} else if (!IS_ACCEL_INTERNED(str)) { \
+			if (!IS_ACCEL_INTERNED(str)) { \
 				zend_accel_store_string(str); \
 			} else { \
 				GC_SET_REFCOUNT(str, 0); \

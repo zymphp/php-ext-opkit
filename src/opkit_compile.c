@@ -84,7 +84,7 @@ static void opkit_clear_ast_ref_list(void);
 
 #define SERIALIZE_STR(ptr) do { \
 		if (ptr && !IS_SERIALIZED(ptr)) { \
-			if (IS_ACCEL_INTERNED(ptr)) { \
+			if (IS_ACCEL_INTERNED(ptr) || ZSTR_IS_INTERNED((zend_string*)(ptr))) { \
 				(ptr) = zend_file_cache_serialize_interned((zend_string*)(ptr), info); \
 			} else { \
 				(ptr) = (void*)((char*)(ptr) - (char*)script->mem); \
