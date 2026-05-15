@@ -400,9 +400,7 @@ static void zend_file_cache_serialize_op_array(zend_op_array *op_array, zend_per
 					SERIALIZE_ATTRIBUTES(Z_PTR_P(literal));
 				}
 #endif
-				if (opline->handler && opline->handler != (void*)(uintptr_t)-1) {
-					zend_serialize_opcode_handler(opline);
-				}
+				zend_serialize_opcode_handler(opline);
 				opline++;
 			}
 		}
@@ -1068,9 +1066,7 @@ static void zend_file_cache_unserialize_op_array(zend_op_array *op_array, zend_p
 				UNSERIALIZE_ATTRIBUTES(Z_PTR_P(literal));
 			}
 #endif
-			if (IS_SERIALIZED(opline->handler)) {
-				zend_deserialize_opcode_handler(opline);
-			}
+			zend_deserialize_opcode_handler(opline);
 			opline++;
 		}
 	}
