@@ -133,19 +133,18 @@ static void zend_hash_persist(HashTable *ht)
 		return;
 	}
 
-	/* Guard against partition overflow corrupting hash table metadata */
-	if (ht->nNumUsed > 1000000 || ht->nTableSize > 1000000) {
+	void *old_data = HT_GET_DATA_ADDR(ht);
+
+	if (HT_IS_PACKED(ht)) {
+		void *new_data = zend_shared_memdup_put(old_data, HT_PACKED_USED_SIZE(ht));
+		efree(old_data);
+		HT_SET_DATA_ADDR(ht, new_data);
 		return;
 	}
 
-	void *old_data = HT_GET_DATA_ADDR(ht);
 	void *new_data = zend_shared_memdup_put(HT_GET_DATA_ADDR(ht), HT_USED_SIZE(ht));
 	efree(old_data);
 	HT_SET_DATA_ADDR(ht, new_data);
-
-	if (HT_IS_PACKED(ht)) {
-		return;
-	}
 
 	/* update the hash table data */
 	nIndex = ht->nTableMask;
@@ -271,18 +270,26 @@ static void zend_persist_zval(zval *z)
 				/* Only ZEND_AST_ZVAL and ZEND_AST_CONSTANT are self-contained
 				 * (allocated on the ZendMM heap, no children in the arena).
 				 * Complex ASTs (ZEND_AST_CLASS_CONST etc.) have children that
-				 * point to freed arena memory and cannot be persisted safely.
-				 * ZEND_AST_CONST_ENUM_INIT refs are managed through
-				 * opkit_ast_ref_list and freed by opkit_clear_ast_ref_list. */
+				 * point to freed arena memory and cannot be persisted safely. */
 				if (ast->kind == ZEND_AST_ZVAL || ast->kind == ZEND_AST_CONSTANT || ast->kind == ZEND_AST_CONST_ENUM_INIT) {
 					Z_AST_P(z) = zend_shared_memdup_put(old_ref, sizeof(zend_ast_ref));
 					zend_persist_ast(ast);
 					Z_TYPE_FLAGS_P(z) = 0;
 					GC_SET_REFCOUNT(Z_COUNTED_P(z), 1);
 					GC_ADD_FLAGS(Z_COUNTED_P(z), GC_IMMUTABLE);
-					if (ast->kind != ZEND_AST_CONST_ENUM_INIT) {
-						efree(old_ref);
+					/* Free heap-allocated child nodes that zend_persist_ast
+					 * copied to shared memory but did not free. opkit_copy_ast_ref
+					 * allocated these via emalloc(). Must be done before efree(old_ref)
+					 * which frees the parent allocation containing the child pointers. */
+					if (ast->kind == ZEND_AST_CONST_ENUM_INIT) {
+						for (uint32_t i = 0; i < 3; i++) {
+							if (ast->child[i] && ast->child[i]->kind == ZEND_AST_ZVAL) {
+								zval_ptr_dtor_nogc(zend_ast_get_zval(ast->child[i]));
+								efree(ast->child[i]);
+							}
+						}
 					}
+					efree(old_ref);
 				} else {
 					ZVAL_NULL(z);
 				}
@@ -385,11 +392,6 @@ static void zend_persist_op_array_ex(zend_op_array *op_array, zend_persistent_sc
 #if PHP_VERSION_ID < 80400
 	if (op_array->doc_comment) {
 		zend_accel_store_interned_string(op_array->doc_comment);
-	}
-#else
-	if (op_array->doc_comment) {
-		zend_string_release_ex(op_array->doc_comment, 0);
-		op_array->doc_comment = NULL;
 	}
 #endif
 
@@ -497,7 +499,7 @@ static void zend_persist_op_array_ex(zend_op_array *op_array, zend_persistent_sc
 		op_array->attributes = zend_persist_attributes(op_array->attributes);
 	}
 
-	if (op_array->num_dynamic_func_defs && op_array->num_dynamic_func_defs < 10000) {
+	if (op_array->num_dynamic_func_defs && op_array->num_dynamic_func_defs < 10000 && op_array->dynamic_func_defs && (uintptr_t)op_array->dynamic_func_defs != (uintptr_t)-1) {
 		zend_op_array **old_defs = op_array->dynamic_func_defs;
 		zend_op_array **new_defs = _opkit_shared_memdup_put_md(old_defs, sizeof(zend_op_array*) * op_array->num_dynamic_func_defs);
 		for (uint32_t i = 0; i < op_array->num_dynamic_func_defs; i++) {
@@ -648,9 +650,11 @@ static void zend_persist_class_constant(zval *zv, zend_class_entry *ce)
 		copy->ce = new_ce;
 	}
 	zend_persist_zval(&copy->value);
+#if PHP_VERSION_ID < 80400
 	if (copy->doc_comment) {
 		zend_accel_store_interned_string(copy->doc_comment);
 	}
+#endif
 	if (copy->attributes) {
 		copy->attributes = zend_persist_attributes(copy->attributes);
 	}
@@ -836,11 +840,7 @@ zend_class_entry *zend_persist_class_entry(zend_class_entry *orig_ce)
 		ce->attributes = zend_persist_attributes(ce->attributes);
 	}
 
-#if PHP_VERSION_ID >= 80400
-	if (ce->doc_comment) {
-		zend_accel_store_interned_string(ce->doc_comment);
-	}
-#else
+#if PHP_VERSION_ID < 80400
 	if (ce->info.user.doc_comment) {
 		zend_accel_store_interned_string(ce->info.user.doc_comment);
 	}
