@@ -31,7 +31,11 @@
 - OpKit 扩展已通过 `php.ini` 作为 `zend_extension` 加载
 - `phar.readonly=Off` 已在 `php.ini` 中配置（如需打包 Phar）
 
-> 本文档所有命令均假设以上环境已就绪，因此不再在命令行中显式指定 `-d zend_extension=` 或 `-d phar.readonly=`。若未通过 `php.ini` 配置，请在命令前追加对应参数。
+> **💡 推荐**：编译时使用 `-n` 跳过 php.ini 中其他扩展（swoole/curl 等），避免内存冲突：
+> ```bash
+> php -n -d zend_extension=opkit.so bin/phpc -s src/ -o dist/
+> ```
+> 本文档示例假设使用 `zend_extension=opkit.so` 方式。若未通过 `php.ini` 配置，请在命令前追加对应参数。
 
 ### 最简编译示例
 
