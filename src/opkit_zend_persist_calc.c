@@ -77,8 +77,15 @@ static void zend_hash_persist_calc(HashTable *ht)
 
 	if (HT_IS_PACKED(ht)) {
 		ADD_SIZE(HT_PACKED_USED_SIZE(ht));
+	} else if (ht->nNumUsed > HT_MIN_SIZE && ht->nNumUsed < (uint32_t)(-(int32_t)ht->nTableMask) / 4) {
+		/* compact sparse table */
+		uint32_t hash_size = (uint32_t)(-(int32_t)ht->nTableMask);
+		while (hash_size >> 2 > ht->nNumUsed) {
+			hash_size >>= 1;
+		}
+		ADD_SIZE(ZEND_ALIGNED_SIZE((hash_size * sizeof(uint32_t)) + (ht->nNumUsed * sizeof(Bucket))));
 	} else {
-		ADD_SIZE(HT_USED_SIZE(ht));
+		ADD_SIZE(ZEND_ALIGNED_SIZE(HT_USED_SIZE(ht)));
 	}
 }
 

@@ -136,30 +136,47 @@ static void zend_hash_persist(HashTable *ht)
 	void *old_data = HT_GET_DATA_ADDR(ht);
 
 	if (HT_IS_PACKED(ht)) {
-		void *new_data = zend_shared_memdup_put(old_data, HT_PACKED_USED_SIZE(ht));
-		efree(old_data);
+		void *new_data;
+		if (GC_FLAGS(ht) & IS_ARRAY_IMMUTABLE) {
+			new_data = zend_shared_memdup_put(old_data, HT_PACKED_USED_SIZE(ht));
+		} else {
+			new_data = zend_shared_memdup_put(old_data, HT_PACKED_USED_SIZE(ht));
+			efree(old_data);
+		}
 		HT_SET_DATA_ADDR(ht, new_data);
 		return;
 	}
 
-	void *new_data = zend_shared_memdup_put(HT_GET_DATA_ADDR(ht), HT_USED_SIZE(ht));
-	efree(old_data);
-	HT_SET_DATA_ADDR(ht, new_data);
+	if (ht->nNumUsed > HT_MIN_SIZE && ht->nNumUsed < (uint32_t)(-(int32_t)ht->nTableMask) / 4) {
+		/* compact sparse table to reduce memory */
+		Bucket *old_buckets = ht->arData;
+		uint32_t hash_size = (uint32_t)(-(int32_t)ht->nTableMask);
+		while (hash_size >> 2 > ht->nNumUsed) {
+			hash_size >>= 1;
+		}
+		ht->nTableMask = (uint32_t)(-(int32_t)hash_size);
+		HT_SET_DATA_ADDR(ht, ZCG(mem));
+		ZCG(mem) = (void*)((char*)ZCG(mem) + ZEND_ALIGNED_SIZE((hash_size * sizeof(uint32_t)) + (ht->nNumUsed * sizeof(Bucket))));
+		HT_HASH_RESET(ht);
+		memcpy(ht->arData, old_buckets, ht->nNumUsed * sizeof(Bucket));
+		efree(old_data);
 
-	/* update the hash table data */
-	nIndex = ht->nTableMask;
-	do {
-		HT_HASH(ht, nIndex) = HT_INVALID_IDX;
-	} while (++nIndex != 0);
-
-	for (idx = 0; idx < ht->nNumUsed; idx++) {
-		p = ht->arData + idx;
-		if (Z_TYPE(p->val) == IS_UNDEF) continue;
-
-		nIndex = p->h | ht->nTableMask;
-		Z_NEXT(p->val) = HT_HASH(ht, nIndex);
-		HT_HASH(ht, nIndex) = HT_IDX_TO_HASH(idx);
+		/* rehash */
+		for (idx = 0; idx < ht->nNumUsed; idx++) {
+			p = ht->arData + idx;
+			if (Z_TYPE(p->val) == IS_UNDEF) continue;
+			nIndex = p->h | ht->nTableMask;
+			Z_NEXT(p->val) = HT_HASH(ht, nIndex);
+			HT_HASH(ht, nIndex) = HT_IDX_TO_HASH(idx);
+		}
+		return;
 	}
+
+	void *data = ZCG(mem);
+	ZCG(mem) = (void*)((char*)data + ZEND_ALIGNED_SIZE(HT_USED_SIZE(ht)));
+	memcpy(data, old_data, HT_USED_SIZE(ht));
+	efree(old_data);
+	HT_SET_DATA_ADDR(ht, data);
 }
 
 static zend_ast *zend_persist_ast(zend_ast *ast)
@@ -347,6 +364,8 @@ static HashTable *zend_persist_attributes(HashTable *attributes)
 
 static void zend_persist_type(zend_type *type)
 {
+	ZEND_TYPE_FULL_MASK(*type) &= ~_ZEND_TYPE_ARENA_BIT;
+
 	if (ZEND_TYPE_HAS_LIST(*type)) {
 		zend_type_list *old_list = ZEND_TYPE_LIST(*type);
 		zend_type_list *new_list;
@@ -389,11 +408,9 @@ static void zend_persist_op_array_ex(zend_op_array *op_array, zend_persistent_sc
 		zend_accel_store_interned_string(op_array->filename);
 	}
 
-#if PHP_VERSION_ID < 80400
 	if (op_array->doc_comment) {
 		zend_accel_store_interned_string(op_array->doc_comment);
 	}
-#endif
 
 	if (op_array->arg_info) {
 		zend_arg_info *arg_info = op_array->arg_info;
@@ -650,11 +667,9 @@ static void zend_persist_class_constant(zval *zv, zend_class_entry *ce)
 		copy->ce = new_ce;
 	}
 	zend_persist_zval(&copy->value);
-#if PHP_VERSION_ID < 80400
 	if (copy->doc_comment) {
 		zend_accel_store_interned_string(copy->doc_comment);
 	}
-#endif
 	if (copy->attributes) {
 		copy->attributes = zend_persist_attributes(copy->attributes);
 	}
