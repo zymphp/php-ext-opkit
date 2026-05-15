@@ -400,7 +400,9 @@ static void zend_file_cache_serialize_op_array(zend_op_array *op_array, zend_per
 					SERIALIZE_ATTRIBUTES(Z_PTR_P(literal));
 				}
 #endif
-				zend_serialize_opcode_handler(opline);
+				if (opline->handler && opline->handler != (void*)(uintptr_t)-1) {
+					zend_serialize_opcode_handler(opline);
+				}
 				opline++;
 			}
 		}
