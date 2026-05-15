@@ -328,7 +328,7 @@ static void zend_file_cache_serialize_type(zend_type *type, zend_persistent_scri
 
 static void zend_file_cache_serialize_op_array(zend_op_array *op_array, zend_persistent_script *script, zend_file_cache_metainfo *info, void *buf)
 {
-	if (op_array->static_variables) {
+	if (op_array->static_variables && op_array->static_variables != (void*)(uintptr_t)-1) {
 		HashTable *ht;
 		SERIALIZE_PTR(op_array->static_variables);
 		ht = op_array->static_variables;
@@ -993,7 +993,7 @@ static void zend_file_cache_unserialize_op_array(zend_op_array *op_array, zend_p
 			ZEND_ASSERT(!(op_array->fn_flags & ZEND_ACC_IMMUTABLE));
 			ZEND_MAP_PTR_INIT(op_array->run_time_cache, NULL);
 		}
-		if (op_array->static_variables) {
+		if (op_array->static_variables && op_array->static_variables != (void*)(uintptr_t)-1) {
 			ZEND_MAP_PTR_NEW(op_array->static_variables_ptr);
 		}
 	} else {
@@ -1002,7 +1002,7 @@ static void zend_file_cache_unserialize_op_array(zend_op_array *op_array, zend_p
 		ZEND_MAP_PTR_INIT(op_array->run_time_cache, NULL);
 	}
 
-	if (op_array->static_variables) {
+	if (op_array->static_variables && op_array->static_variables != (void*)(uintptr_t)-1) {
 		UNSERIALIZE_PTR(op_array->static_variables);
 		zend_file_cache_unserialize_hash(op_array->static_variables, script, buf, zend_file_cache_unserialize_zval, ZVAL_PTR_DTOR);
 	}
@@ -2041,7 +2041,7 @@ static void opkit_destroy_op_array_safe(zend_op_array *op_array)
 		op_array->dynamic_func_defs = NULL;
 	}
 
-	if (op_array->static_variables) {
+	if (op_array->static_variables && op_array->static_variables != (void*)(uintptr_t)-1) {
 		efree(op_array->static_variables);
 		op_array->static_variables = NULL;
 	}

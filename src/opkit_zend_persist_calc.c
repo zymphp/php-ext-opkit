@@ -271,7 +271,7 @@ static void zend_persist_op_array_calc_ex(zend_op_array *op_array)
 		return;
 	}
 
-	if (op_array->static_variables) {
+	if (op_array->static_variables && op_array->static_variables != (void*)(uintptr_t)-1) {
 		if (!zend_shared_alloc_get_xlat_entry(op_array->static_variables)) {
 			Bucket *p;
 
@@ -355,7 +355,7 @@ static void zend_persist_op_array_calc_ex(zend_op_array *op_array)
 	}
 #endif
 
-	if (op_array->attributes) {
+	if (op_array->attributes && op_array->attributes != (void*)(uintptr_t)-1) {
 		zend_persist_attributes_calc(op_array->attributes);
 	}
 #if PHP_VERSION_ID >= 80400

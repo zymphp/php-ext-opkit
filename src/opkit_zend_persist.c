@@ -113,6 +113,10 @@ static void zend_hash_persist(HashTable *ht)
 	uint32_t idx, nIndex;
 	Bucket *p;
 
+	if ((uintptr_t)ht == (uintptr_t)-1 || (uintptr_t)ht < 4096) {
+		return;
+	}
+
 	HT_FLAGS(ht) |= HASH_FLAG_STATIC_KEYS;
 	ht->pDestructor = NULL;
 	ht->nInternalPointer = 0;
@@ -126,6 +130,11 @@ static void zend_hash_persist(HashTable *ht)
 		ht->nTableMask = HT_MIN_MASK;
 		HT_SET_DATA_ADDR(ht, (void*)&uninitialized_bucket);
 		HT_FLAGS(ht) |= HASH_FLAG_UNINITIALIZED;
+		return;
+	}
+
+	/* Guard against partition overflow corrupting hash table metadata */
+	if (ht->nNumUsed > 1000000 || ht->nTableSize > 1000000) {
 		return;
 	}
 
@@ -470,7 +479,7 @@ static void zend_persist_op_array_ex(zend_op_array *op_array, zend_persistent_sc
 		op_array->literals = copy;
 	}
 
-	if (op_array->static_variables) {
+	if (op_array->static_variables && (uintptr_t)op_array->static_variables != (uintptr_t)-1) {
 		HashTable *old_ht = op_array->static_variables;
 		HashTable *new_ht = _opkit_shared_memdup_put_md(old_ht, sizeof(HashTable));
 		zend_hash_persist(new_ht);
@@ -484,11 +493,11 @@ static void zend_persist_op_array_ex(zend_op_array *op_array, zend_persistent_sc
 		op_array->static_variables = new_ht;
 	}
 
-	if (op_array->attributes) {
+	if (op_array->attributes && (uintptr_t)op_array->attributes != (uintptr_t)-1) {
 		op_array->attributes = zend_persist_attributes(op_array->attributes);
 	}
 
-	if (op_array->num_dynamic_func_defs) {
+	if (op_array->num_dynamic_func_defs && op_array->num_dynamic_func_defs < 10000) {
 		zend_op_array **old_defs = op_array->dynamic_func_defs;
 		zend_op_array **new_defs = _opkit_shared_memdup_put_md(old_defs, sizeof(zend_op_array*) * op_array->num_dynamic_func_defs);
 		for (uint32_t i = 0; i < op_array->num_dynamic_func_defs; i++) {
@@ -501,7 +510,7 @@ static void zend_persist_op_array_ex(zend_op_array *op_array, zend_persistent_sc
 		op_array->dynamic_func_defs = new_defs;
 	}
 
-	if (op_array->cache_size) {
+	if (op_array->cache_size > 0 && op_array->cache_size < 1048576) {
 		memset(ZCG(mem), 0, op_array->cache_size);
 		if (main_persistent_script) {
 			op_array->run_time_cache__ptr = (void**)(uintptr_t)((char*)ZCG(mem) - (char*)main_persistent_script->mem);
