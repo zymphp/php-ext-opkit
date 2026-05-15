@@ -57,11 +57,11 @@ size_t opkit_misc_size = 0;
 		if (str) { \
 			zend_string *new_str = zend_shared_alloc_get_xlat_entry(str); \
 			if (new_str) { \
-				zend_string_release_ex(str, 0); \
+				zend_string_release_ex(str, GC_FLAGS(str) & IS_STR_PERSISTENT); \
 				str = new_str; \
 			} else { \
 				new_str = _opkit_shared_memdup_put_dt((void*)str, _ZSTR_STRUCT_SIZE(ZSTR_LEN(str))); \
-				zend_string_release_ex(str, 0); \
+				zend_string_release_ex(str, GC_FLAGS(str) & IS_STR_PERSISTENT); \
 				str = new_str; \
 				zend_string_hash_val(str); \
 				zend_set_str_gc_flags(str); \
