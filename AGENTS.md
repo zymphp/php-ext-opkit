@@ -68,10 +68,12 @@ Two new PHP functions support cleanup after batch compilation:
 ## Run Locally
 
 ```bash
-php-src/php-8.5.4/sapi/cli/php -d zend_extension=$(pwd)/modules/opkit.so ./bin/phpc --help
+php-src/php-8.5.4/sapi/cli/php -n -d zend_extension=$(pwd)/modules/opkit.so ./bin/phpc --help
 # Or use tmp/php-dev.ini:
 php-src/php-8.5.4/sapi/cli/php -c tmp/php-dev.ini ./bin/phpc -s src/ -o dist/
 ```
+
+**Recommendation**: Use `-n` (no php.ini) with explicit `zend_extension` to isolate from other extensions that may cause memory conflicts (swoole, curl). The `tmp/php-dev.ini` already loads only opkit.
 
 ## Source Layout
 

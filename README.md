@@ -55,6 +55,11 @@ zend_extension=opkit.so
 ```
 
 > **⚠️ 注意**：OpKit 通过深度集成可与 Zend OPcache 静默共存。
+>
+> **💡 推荐**：`phpc` 编译时使用 `-n`（不加载 php.ini 其他扩展）隔离运行，避免 swoole/curl 等扩展与 opkit 产生内存冲突：
+> ```bash
+> php -n -d zend_extension=opkit.so bin/phpc -s src/ -o dist/
+> ```
 
 ### 配置项
 
@@ -91,7 +96,7 @@ opkit.shm_size=33554432
 使用内置的 `phpc` 工具将 `src/` 目录下的所有 PHP 文件编译到 `dist/` 目录：
 
 ```bash
-php -d zend_extension=opkit.so bin/phpc -s src/ -o dist/
+php -n -d zend_extension=opkit.so bin/phpc -s src/ -o dist/
 ```
 
 ### 2. 运行应用
@@ -111,12 +116,12 @@ php -d zend_extension=opkit.so dist/entry.php
 
 | 场景 | 命令 |
 | :--- | :--- |
-| **基础编译** | `phpc -s src/ -o dist/` |
-| **使用配置** | `phpc -c opkit.json` |
-| **强制重编** | `phpc -s src/ -o dist/ -f` |
-| **静态分析** | `phpc analyze <dir\|file>` |
-| **打包 Phar** | `phpc -s src/ -o dist/ -p app.phar` |
-| **查看详情** | `phpc -i dist/User.phpc` |
+| **基础编译** | `php -n -d zend_extension=opkit.so bin/phpc -s src/ -o dist/` |
+| **使用配置** | `php -n -d zend_extension=opkit.so bin/phpc -c opkit.json` |
+| **强制重编** | `php -n -d zend_extension=opkit.so bin/phpc -s src/ -o dist/ -f` |
+| **静态分析** | `php -n -d zend_extension=opkit.so bin/phpc analyze <dir\|file>` |
+| **打包 Phar** | `php -n -d zend_extension=opkit.so bin/phpc -s src/ -o dist/ -p app.phar` |
+| **查看详情** | `php -n -d zend_extension=opkit.so bin/phpc -i dist/User.phpc` |
 
 > 📖 **完整使用说明**：请参阅 [`PHPC_MANUAL.md`](PHPC_MANUAL.md)，包含增量编译、多源路径、glob 通配符、Phar 压缩签名、静态分析、Stub 生成等详细用法。
 
