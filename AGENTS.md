@@ -129,3 +129,30 @@ Four shadow partitions, sized with macros then allocated as one block via `ZCG(m
 ## Incremental Builds
 
 `phpc` skips recompilation when target exists and source mtime ≤ target mtime AND system_id matches. System ID encodes PHP version + arch + compile options. Force rebuild with `-f`.
+
+## Known Issues
+
+### PHP 8.2 Persistent String Conflict with swoole/curl
+
+When both `swoole` and `curl` extensions are loaded alongside OpKit, a `munmap_chunk(): invalid pointer` crash may occur during PHP shutdown (after compilation succeeds). The crash is in `zend_interned_strings_deactivate` → `zend_hash_destroy(CG(interned_strings))`.
+
+**Root cause**: Swoole's MINIT calls `zend_string_init(..., persistent=1)` + `zend_new_interned_string()` for ~70 known strings (see `ext-src/php_swoole_cxx.cc:21-28` in swoole source). Combined with curl's persistent string allocations, the ZendMM heap layout shifts such that a minor partition overflow in OpKit's persist phase corrupts the `CG(interned_strings)` hash table's internal data.
+
+**Workaround**: phpc compilation does not need swoole or curl. Use one of:
+
+```bash
+# Option 1: -n (cleanest — no php.ini, only opkit)
+/usr/local/php82/bin/php -n -d zend_extension=opkit bin/phpc -f -s src/ -o dist/
+
+# Option 2: Separate ini without swoole/curl
+grep -v '^extension=curl\|^extension=swoole' /usr/local/php82/etc/php.ini > /usr/local/php82/etc/phpc.ini
+/usr/local/php82/bin/php -c /usr/local/php82/etc/phpc.ini bin/phpc -f -s src/ -o dist/
+```
+
+### PHP 8.2 NULL Opcode Handler (debug builds only)
+
+PHP 8.2 debug builds may trigger `ZEND_ASSERT(zv != NULL)` in `zend_serialize_opcode_handler` when compiling interface-heavy files. Release builds are unaffected. This is a PHP 8.2 compiler issue where `ZEND_COMPILE_DELAYED_BINDING` leaves opcode handlers unset on some interface abstract method opcodes.
+
+### PHP 8.2 Uninitialized op_array Fields
+
+PHP 8.2's `init_op_array` does not initialize all tail fields of `zend_op_array` (notably `cache_size`, `num_dynamic_func_defs`, `attributes`, `static_variables`). The ZendMM-reused memory may contain garbage values. OpKit's persist code guards against these with sanity checks (`> 0 && < 1MB`, `!= (void*)-1`).
