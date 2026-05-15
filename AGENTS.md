@@ -25,7 +25,7 @@ php-src/php-8.5.4/sapi/cli/php -d zend_extension=$(pwd)/modules/opkit.so \
 Tests use `.phpt` format. Check failures in `tests/*.diff` and `tests/*.out`.
 `ext/opkit/tests/` is empty; real tests are in root `tests/`.
 
-Test results (2026-05-14): **0 failing across PHP 8.2/8.3/8.4/8.5** (100% of non-skipped).
+Test results (2026-05-16): **0 failing across PHP 8.2/8.3/8.4/8.5** (100% of non-skipped).
 
 | PHP | Pass | Skip | Fail | Rate |
 |-----|------|------|------|------|
@@ -156,3 +156,32 @@ PHP 8.2 debug builds may trigger `ZEND_ASSERT(zv != NULL)` in `zend_serialize_op
 ### PHP 8.2 Uninitialized op_array Fields
 
 PHP 8.2's `init_op_array` does not initialize all tail fields of `zend_op_array` (notably `cache_size`, `num_dynamic_func_defs`, `attributes`, `static_variables`). The ZendMM-reused memory may contain garbage values. OpKit's persist code guards against these with sanity checks (`> 0 && < 1MB`, `!= (void*)-1`).
+
+### PHP 8.2 Large File Compilation (production builds)
+
+Large classes with 20+ methods on PHP 8.2 release builds may cause `zend_mm_heap corrupted` due to uninitialized struct tail fields overflowing partition calculations. This is a PHP 8.2 compiler defect. **Workaround**: compile with PHP 8.5 (recommended), or reduce class size. Simple files (fewer methods, no deep inheritance) compile correctly on all PHP versions. The debug build (php-src/php-8.2.30) has additional assertions that catch the corruption earlier.
+
+### PHP 8.2 Load Crash (cross-process)
+
+Loading `.phpc` files compiled on a different PHP process may segfault on PHP 8.2 release builds if the file contains typed parameters/returns whose type names were PHP-interned but not properly serialized. The `SERIALIZE_STR` macro now handles `ZSTR_IS_INTERNED` strings via `zend_file_cache_serialize_interned`. Same-process compilation+loading works correctly across all versions.
+
+## OpKit vs OPcache — Architecture Differences
+
+OpKit is heavily based on OPcache's `zend_file_cache.c` + `zend_persist.c`. Key intentional divergences:
+
+| Area | OPcache | OpKit | Reason |
+|------|---------|-------|--------|
+| **serialize_type** | `SERIALIZE_STR(type_name)` | Also checks `ZSTR_IS_INTERNED` → uses `zend_file_cache_serialize_interned` | PHP-interned strings outside persist block give negative offsets |
+| **store_string release** | `zend_string_release_ex(str, 0)` | `zend_string_release_ex(str, GC_FLAGS & IS_STR_PERSISTENT)` | Correctly handles persistent strings from extensions (swoole) |
+| **zend_set_str_gc_flags** | `GC_SET_REFCOUNT(str, 2)` | `GC_SET_REFCOUNT(str, 0)` | OpKit manually manages xlat lifecycle |
+| **hash_persist** | Immutable array uses `zend_shared_memdup` (no efree) | Always efrees old_data (guarded by null check) | OpKit doesn't use shared memory; always safe to free |
+| **op_array doc_comment** | Guarded by `save_comments` directive | Always persisted | phpc always wants comments preserved for stubs |
+| **serialize opcode handler** | No null guard | `if (handler && handler != -1)` on serialize side only | PHP 8.2 DELAYED_BINDING may leave NULL handlers |
+
+Missing features (low priority, no runtime impact for current use cases):
+
+| Missing | Impact |
+|---------|--------|
+| Shared op_array dedup in serialize/unserialize | Larger .phpc files for inherited methods |
+| Compaction in `zend_file_cache_serialize_hash` | Slightly larger hashtable serialization |
+| `save_comments` directive support | Comments always persisted (desired for phpc) |
