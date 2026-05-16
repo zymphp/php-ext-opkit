@@ -364,8 +364,6 @@ static HashTable *zend_persist_attributes(HashTable *attributes)
 
 static void zend_persist_type(zend_type *type)
 {
-	ZEND_TYPE_FULL_MASK(*type) &= ~_ZEND_TYPE_ARENA_BIT;
-
 	if (ZEND_TYPE_HAS_LIST(*type)) {
 		zend_type_list *old_list = ZEND_TYPE_LIST(*type);
 		zend_type_list *new_list;
@@ -374,6 +372,7 @@ static void zend_persist_type(zend_type *type)
 		} else {
 			new_list = _opkit_shared_memdup_put_free_ms(old_list, ZEND_TYPE_LIST_SIZE(old_list->num_types));
 		}
+		ZEND_TYPE_FULL_MASK(*type) &= ~_ZEND_TYPE_ARENA_BIT;
 		for (uint32_t i = 0; i < new_list->num_types; i++) {
 			zend_persist_type(&new_list->types[i]);
 		}
