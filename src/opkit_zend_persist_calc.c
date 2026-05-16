@@ -411,7 +411,7 @@ static void zend_persist_op_array_calc(zval *zv)
 	}
 }
 
-static void zend_persist_class_method_calc(zval *zv)
+static void zend_persist_class_method_calc(zval *zv, zend_class_entry *ce)
 {
 	zend_op_array *op_array = Z_PTR_P(zv);
 	zend_op_array *old_op_array;
@@ -428,20 +428,23 @@ static void zend_persist_class_method_calc(zval *zv)
 		return;
 	}
 
-	old_op_array = zend_shared_alloc_get_xlat_entry(op_array);
-	if (!old_op_array) {
-		ADD_SIZE(sizeof(zend_op_array));
-		zend_persist_op_array_calc_ex(Z_PTR_P(zv));
-		zend_shared_alloc_register_xlat_entry(op_array, Z_PTR_P(zv));
-	} else {
-		/* If op_array is shared, the function name refcount is still incremented for each use,
-		 * so we need to release it here. We remembered the original function name in xlat. */
-		zend_string *old_function_name =
-			zend_shared_alloc_get_xlat_entry(&old_op_array->function_name);
-		if (old_function_name) {
-			zend_string_release_ex(old_function_name, 0);
+	/* Match persist's scope-based dedup:
+	 * - Own methods (scope == ce): always allocate, never check xlat_table
+	 * - Inherited methods (scope != ce): check xlat_table, skip if found */
+	if (op_array->scope != ce) {
+		old_op_array = zend_shared_alloc_get_xlat_entry(op_array);
+		if (old_op_array) {
+			zend_string *old_function_name = zend_shared_alloc_get_xlat_entry(&op_array->function_name);
+			if (old_function_name && op_array->function_name != old_function_name) {
+				zend_string_release(op_array->function_name);
+			}
+			return;
 		}
 	}
+
+	ADD_SIZE(sizeof(zend_op_array));
+	zend_persist_op_array_calc_ex(Z_PTR_P(zv));
+	zend_shared_alloc_register_xlat_entry(op_array, Z_PTR_P(zv));
 }
 
 static void zend_persist_property_info_calc(zend_property_info *prop)
@@ -531,7 +534,7 @@ void zend_persist_class_entry_calc(zend_class_entry *ce)
 		ZEND_HASH_MAP_FOREACH_BUCKET(&ce->function_table, p) {
 			ZEND_ASSERT(p->key != NULL);
 			ADD_INTERNED_STRING(p->key);
-			zend_persist_class_method_calc(&p->val);
+			zend_persist_class_method_calc(&p->val, ce);
 		} ZEND_HASH_FOREACH_END();
 		if (ce->default_properties_table) {
 		    int i;
@@ -764,4 +767,7 @@ uint32_t zend_accel_script_persist_calc(zend_persistent_script *script, int for_
 	ZCG(current_persistent_script) = NULL;
 
 	return script->size;
+}
+__attribute__((unused)) static void calclog(const char *step, void *ptr, const char *label) {
+    if (getenv("OPKIT_DEBUG")) fprintf(stderr, "CALC %s ptr=%p label=%s\n", step, ptr, label ? label : "?");
 }
