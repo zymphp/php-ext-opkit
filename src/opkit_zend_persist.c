@@ -399,7 +399,16 @@ static void zend_persist_op_array_ex(zend_op_array *op_array, zend_persistent_sc
 	op_array->refcount = NULL;
 
 	if (op_array->scope) {
+		if (zend_shared_alloc_get_xlat_entry(op_array->opcodes)) {
+			return;
+		}
 		op_array->scope = zend_shared_alloc_get_xlat_entry(op_array->scope);
+	}
+
+	if (op_array->scope
+	 && !(op_array->fn_flags & ZEND_ACC_CLOSURE)
+	 && (op_array->scope->ce_flags & ZEND_ACC_CACHED)) {
+		return;
 	}
 
 	zend_accel_store_interned_string(op_array->function_name);
