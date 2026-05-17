@@ -89,14 +89,13 @@
 - 问题: 编译包含跨文件类引用的代码（如 enum case 或 `new` 默认参数）时，`zval_update_constant_ex` 触发 `zend_lookup_class`，若类未加载会导致 fatal error
 - 修复: `bin/phpc` 在编译前预扫描所有源文件，构建 FQCN → 文件路径映射，注册 `spl_autoload_register` 回调按需 `require_once`，解决编译时类依赖问题
 
-### 测试结果汇总 (2026-05-14)
+### 测试结果汇总 (2026-05-17)
 
-| PHP 版本 | 通过 | 跳过 | 失败 | 通过率 |
-|---------|------|------|------|--------|
-| PHP 8.2.30 | 29 | 5 | 0 | 100% |
-| PHP 8.3.30 | 29 | 5 | 0 | 100% |
-| PHP 8.4.19 | 30 | 4 | 0 | 100% |
-| PHP 8.5.4  | 31 | 3 | 0 | 100% |
+| PHP 版本 | 通过 | 跳过 | 失败 | 通过率 | neuron-core |
+|---------|------|------|------|--------|-------------|
+| PHP 8.5.4  | 31 | 3 | 0 | 100% | 360/360 ✅ |
+
+(8.2/8.3/8.4 待验证)
 
 ### 新增测试文件 (2026-05-14)
 - `tests/31_compile_file_basepath.phpt` - `opkit_compile_file` 显式 base_path 保留目录结构
@@ -150,3 +149,61 @@
 - 修复: `bin/phpc` 编译前预扫描源文件，`extract_fqcn()` 提取命名空间+类名，构建映射表，注册 `spl_autoload_register`
 - 新增: `opkit_globals_mark()` / `opkit_globals_cleanup()` PHP 函数，清理 autoloader 引入的全局表条目
 - 新增: `zend_persist_zval` 在持久化后 `efree` enum AST 的 `zend_ast_zval` 堆子节点
+
+### 已修复 (2026-05-17) —— 持久化 calc/persist 去重对齐 & autoloader 完善
+
+**✅ 1. arena 位清除顺序错误 (`7e6a8b2`)**
+- `zend_persist_type` 中 `ZEND_TYPE_FULL_MASK(*type) &= ~_ZEND_TYPE_ARENA_BIT` 在 `ZEND_TYPE_USES_ARENA(*type)` 检查前执行 → arena 类型列表走 `efree()` 破坏 ZendMM
+- 修复: 清除移到检查后，对齐所有 PHP 版本 OPcache
+
+**✅ 2. class method calc scope 去重对齐 (`4fb640d`)**
+- `zend_persist_class_method_calc` 无条件 xlat_table 去重，但 persist 对 `scope == ce` 不去重
+- 亲子类处理顺序不同时 calc 少算 `sizeof(zend_op_array)` = 256 bytes
+- 修复: calc 对齐 persist: `scope != ce` 查 xlat，`scope == ce` 不计 xlat
+
+**✅ 3. persist 补齐 opcodes-in-xlat + cached-class 早返回 (`5a7ba48`)**
+- `zend_persist_op_array_ex` 缺少 calc 已有的两处早返回 → 共享 op_array 重复分配
+- 修复: persist 也检查 `zend_shared_alloc_get_xlat_entry(op_array->opcodes)` 和 `ZEND_ACC_CACHED`
+
+**✅ 4. phpc 单文件 autoloader + buffer margin (`b4fa5bb`)**
+- 单文件编译不注册 autoloader → 枚举类 "Class not found"
+- calc/persist 残余溢出需 margin 防护
+- 修复: phpc 单文件也扫描父目录；buffer 从 +64 → +4096
+
+### 🔴 已知问题 (2026-05-17)
+
+**1. 残余 persist_calc 溢出（49 文件，64~432 bytes/files）**
+- 根因: `zend_persist_op_array_calc_ex` 与 `zend_persist_op_array_ex` 之间仍有去重逻辑不一致（同 fix #2/#3 模式但牵涉不同结构: dynamic_func_defs, static_variables, warnings, 继承属性）
+- 现象: `persisted_script->size > memory_used`（现在 +4096 margin 防崩溃）
+- 计划:
+  1. 对 `zend_persist_op_array_calc`（standalone funcs + dynamic_func_defs）→ 对齐 xlat_table 去重逻辑
+  2. 对 `zend_persist_property_info_calc` hooks → 对齐 persist 的 `zend_shared_memdup_put` 内隐去重
+  3. 对 `zend_persist_class_constant_calc` → 对照 persist 逐行查 skip 点
+  4. 添加 persist 侧 per-partition 计数，与 calc 分区对比打印差异定位
+  5. 目标: margin 回退到 +64
+
+**2. 编译进程内存泄漏（约 140+ leaks，shutdown 报告）**
+- 现象: `zend_string.h(167)`, `zend_objects.c(191)`, `zend_ast.c(1358)` 报告 Freeing
+- 来源:
+  - autoloader `require_once` 触发的 PHP 原始编译器分配
+  - `opkit_destroy_op_array_safe` / `opkit_free_ast_ref_list` 未覆盖全部
+- 计划:
+  1. 在 `opkit_compile_file` 析构阶段增加 `zend_string_release` 批量释放 autoloaded 字符串
+  2. valgrind `--leak-check=full` 追踪具体泄漏来源和调用栈
+  3. 针对各类泄漏补充 `efree` / `zend_string_release` / `zval_ptr_dtor`
+
+**3. PHP 8.2 验证**
+- PHP 8.2 有已知未初始化字段问题（`cache_size`, `num_dynamic_func_defs`, `static_variables` 等）
+- 当前仅在 PHP 8.5 测试通过；用户原始错误在 PHP 8.2
+- 计划:
+  1. 用 `php-src/php-8.2.30/` 的 phpize 重编译 OpKit
+  2. 运行测试套件确认 29 pass / 0 fail
+  3. 编译 neuron-core 360 文件验证无 crash
+  4. 针对性修复 8.2 未初始化字段 guard（已有 sanity check 但仍需加固）
+
+**4. 边缘 case（来自 AGENTS.md）**
+- Class constant array keys 用 `self::CONST`，class 未链接时不可解析 → `zval_update_constant_ex` 对 unresolved class 行为不确定
+- 常量引用其他文件的常量 → 不在同批次编译时 runtime 才解析
+- 计划:
+  1. 为 `self::CONST` 添加延迟解析（仿 `ZEND_AST_CONST_ENUM_INIT` → 拷贝到堆，运行时解析）
+  2. 对跨文件常量引用，利用 autoloader 提前加载（已完成），剩余 edge case 需 runtime 兜底
