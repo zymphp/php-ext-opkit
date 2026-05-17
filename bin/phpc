@@ -182,7 +182,10 @@ if ($can_compile) {
     $scan_it = is_dir($abs_src) ? new RecursiveIteratorIterator(
         new RecursiveDirectoryIterator($abs_src, RecursiveDirectoryIterator::SKIP_DOTS),
         RecursiveIteratorIterator::SELF_FIRST
-    ) : [];
+    ) : new RecursiveIteratorIterator(
+        new RecursiveDirectoryIterator(dirname($abs_src), RecursiveDirectoryIterator::SKIP_DOTS),
+        RecursiveIteratorIterator::SELF_FIRST
+    );
     foreach ($scan_it as $scan_file) {
         if ($scan_file->isFile() && $scan_file->getExtension() === 'php') {
             $fqcn = extract_fqcn($scan_file->getRealPath());

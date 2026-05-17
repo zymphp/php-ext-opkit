@@ -2412,7 +2412,7 @@ int opkit_compile_script_store(zend_string *output_path, zend_persistent_script 
 	memory_used = zend_accel_script_persist_calc(script, 0);
 
 	/* Allocate memory block */
-	void *mem_to_free = emalloc(memory_used + 64);
+	void *mem_to_free = emalloc(memory_used + 4096);
 	ZCG(mem) = (void *)(((uintptr_t)mem_to_free + 63L) & ~63L);
 
 	zend_shared_alloc_clear_xlat_table();
@@ -2483,7 +2483,7 @@ int opkit_compile_script_store(zend_string *output_path, zend_persistent_script 
 
 #if defined(__AVX__) || defined(__SSE2__)
 	/* Alignment to 64-byte boundary */
-	void *buf_mem_to_free = emalloc(memory_used + 64);
+	void *buf_mem_to_free = emalloc(memory_used + 4096);
 	buf = (void*)(((uintptr_t)buf_mem_to_free + 63L) & ~63L);
 #else
 	void *buf_mem_to_free = buf = emalloc(memory_used);
