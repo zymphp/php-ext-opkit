@@ -853,6 +853,9 @@ static zend_always_inline void *_opkit_shared_memdup_put(void *source, size_t si
 #undef zend_shared_memdup_put
 #define zend_shared_memdup_put _opkit_shared_memdup_put
 
+#undef zend_shared_memdup
+#define zend_shared_memdup _opkit_shared_memdup_put
+
 #define _opkit_shared_memdup_put_dt _opkit_shared_memdup_put
 #define _opkit_shared_memdup_put_md _opkit_shared_memdup_put
 #define _opkit_shared_memdup_put_cd _opkit_shared_memdup_put
