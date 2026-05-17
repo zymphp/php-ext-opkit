@@ -141,8 +141,8 @@ static void *zend_file_cache_serialize_interned(zend_string *str, zend_file_cach
 	ret = (void*)(info->str_size | Z_UL(1));
 	zend_shared_alloc_register_xlat_entry(str, ret);
 
-	if (info->str_size + len > ZSTR_LEN(current_string_pool)) {
-		size_t new_len = info->str_size + len;
+	if (info->str_size + ZEND_ALIGNED_SIZE(len) > ZSTR_LEN(current_string_pool)) {
+		size_t new_len = info->str_size + ZEND_ALIGNED_SIZE(len);
 		current_string_pool = zend_string_realloc(
 			current_string_pool,
 			((_ZSTR_HEADER_SIZE + 1 + new_len + 4095) & ~0xfff) - (_ZSTR_HEADER_SIZE + 1),
@@ -2097,8 +2097,7 @@ char *opkit_compile_get_phpc_file_path(zend_string *output_path, zend_string *re
 			if (len > 0 && filename[len-1] != '/') {
 				filename[len++] = '/';
 			}
-			filename[len] = '\0';
-			strcat(filename, p);
+			memcpy(filename + len, p, ZSTR_LEN(rel_path) + 1);
 		} else {
 			filename = emalloc(ZSTR_LEN(rel_path) + sizeof(SUFFIX) + 1);
 			memcpy(filename, p, ZSTR_LEN(rel_path) + 1);
@@ -2108,12 +2107,11 @@ char *opkit_compile_get_phpc_file_path(zend_string *output_path, zend_string *re
 	// Replace .php with .phpc if it exists at the end, or skip if already .phpc
 	size_t f_len = strlen(filename);
 	if (f_len >= 4 && strcmp(filename + f_len - 4, ".php") == 0) {
-		filename[f_len - 4] = '\0';
-		strcat(filename, SUFFIX);
+		memcpy(filename + f_len - 4, SUFFIX, sizeof(SUFFIX));
 	} else if (f_len >= strlen(SUFFIX) && strcmp(filename + f_len - strlen(SUFFIX), SUFFIX) == 0) {
 		// Already has .phpc, do nothing
 	} else {
-		strcat(filename, SUFFIX);
+		memcpy(filename + f_len, SUFFIX, sizeof(SUFFIX));
 	}
 
 	return filename;
