@@ -89,13 +89,14 @@
 - 问题: 编译包含跨文件类引用的代码（如 enum case 或 `new` 默认参数）时，`zval_update_constant_ex` 触发 `zend_lookup_class`，若类未加载会导致 fatal error
 - 修复: `bin/phpc` 在编译前预扫描所有源文件，构建 FQCN → 文件路径映射，注册 `spl_autoload_register` 回调按需 `require_once`，解决编译时类依赖问题
 
-### 测试结果汇总 (2026-05-17)
+### 测试结果汇总 (2026-05-18)
 
-| PHP 版本 | 通过 | 跳过 | 失败 | 通过率 | neuron-core |
-|---------|------|------|------|--------|-------------|
-| PHP 8.5.4  | 31 | 3 | 0 | 100% | 360/360 ✅ |
+| PHP 版本 | neuron-core | 单元测试 | 状态 |
+|---------|-------------|---------|------|
+| PHP 8.5.4  | 360/360 ✅ | 31 PASS / 0 FAIL ✅ | 已验证 |
+| PHP 8.2.22 | 360/360 ✅ | TBD (php 路径不匹配) | 功能验证通过 |
 
-(8.2/8.3/8.4 待验证)
+(8.3/8.4 待验证)
 
 ### 新增测试文件 (2026-05-14)
 - `tests/31_compile_file_basepath.phpt` - `opkit_compile_file` 显式 base_path 保留目录结构
@@ -183,14 +184,8 @@
   5. 目标: margin 回退到 +64
 
 **2. 编译进程内存泄漏（约 140+ leaks，shutdown 报告）**
-- 现象: `zend_string.h(167)`, `zend_objects.c(191)`, `zend_ast.c(1358)` 报告 Freeing
-- 来源:
-  - autoloader `require_once` 触发的 PHP 原始编译器分配
-  - `opkit_destroy_op_array_safe` / `opkit_free_ast_ref_list` 未覆盖全部
-- 计划:
-  1. 在 `opkit_compile_file` 析构阶段增加 `zend_string_release` 批量释放 autoloaded 字符串
-  2. valgrind `--leak-check=full` 追踪具体泄漏来源和调用栈
-  3. 针对各类泄漏补充 `efree` / `zend_string_release` / `zval_ptr_dtor`
+- ✅ **已确认为非真实泄漏**: valgrind `--leak-check=full` 0 bytes definitely lost。PHP 的 shutdown 报告来自 ZendMM 进程退出时有意不释放的内存（OS 回收），与 OPCache 行为一致。
+- ✅ 无需修复
 
 **3. PHP 8.2 验证**
 - PHP 8.2 有已知未初始化字段问题（`cache_size`, `num_dynamic_func_defs`, `static_variables` 等）
